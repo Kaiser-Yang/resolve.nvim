@@ -4,9 +4,9 @@ local M = {}
 local config = {
   -- Conflict marker patterns (Lua patterns, must match from start of line)
   markers = {
-    ours = "^<<<<<<<+",      -- Start of "ours" section
-    theirs = "^>>>>>>>+",    -- End of "theirs" section
-    ancestor = "^|||||||+",  -- Start of ancestor/base section (diff3)
+    ours = "^<<<<<<<+",       -- Start of "ours" section
+    theirs = "^>>>>>>>+",     -- End of "theirs" section
+    ancestor = "^|||||||+",   -- Start of ancestor/base section (diff3)
     separator = "^=======+$", -- Separator between sections
   },
   -- Keymaps (set to false to disable default keymaps)
@@ -55,7 +55,9 @@ local function setup_plug_mappings()
   vim.keymap.set("n", "<Plug>(resolve-both-reverse)", M.choose_both_reverse, { desc = "Choose both (reverse) (Resolve)" })
   vim.keymap.set("n", "<Plug>(resolve-base)", M.choose_base, { desc = "Choose base (Resolve)" })
   vim.keymap.set("n", "<Plug>(resolve-none)", M.choose_none, { desc = "Choose none (Resolve)" })
-  vim.keymap.set("n", "<Plug>(resolve-diff)", M.show_diff, { desc = "Show diff (Resolve)" })
+  vim.keymap.set("n", "<Plug>(resolve-diff-ours)", M.show_diff_ours, { desc = "Show diff ours (Resolve)" })
+  vim.keymap.set("n", "<Plug>(resolve-diff-theirs)", M.show_diff_theirs, { desc = "Show diff theirs (Resolve)" })
+  vim.keymap.set("n", "<Plug>(resolve-diff-both)", M.show_diff_both, { desc = "Show diff both (Resolve)" })
   vim.keymap.set("n", "<Plug>(resolve-list)", M.list_conflicts, { desc = "List conflicts (Resolve)" })
 end
 
@@ -68,19 +70,34 @@ local function setup_buffer_keymaps(bufnr)
 
   local opts = { buffer = bufnr, silent = true }
 
-  -- Register the group for which-key
+  -- Register groups for which-key
   vim.keymap.set("n", "<leader>gc", "", vim.tbl_extend("force", opts, { desc = "+Git Conflicts" }))
+  vim.keymap.set("n", "<leader>gcd", "", vim.tbl_extend("force", opts, { desc = "+Diff" }))
 
-  vim.keymap.set("n", "]x", "<Plug>(resolve-next)", vim.tbl_extend("force", opts, { desc = "Next conflict", remap = true }))
-  vim.keymap.set("n", "[x", "<Plug>(resolve-prev)", vim.tbl_extend("force", opts, { desc = "Previous conflict", remap = true }))
-  vim.keymap.set("n", "<leader>gco", "<Plug>(resolve-ours)", vim.tbl_extend("force", opts, { desc = "Choose ours", remap = true }))
-  vim.keymap.set("n", "<leader>gct", "<Plug>(resolve-theirs)", vim.tbl_extend("force", opts, { desc = "Choose theirs", remap = true }))
-  vim.keymap.set("n", "<leader>gcb", "<Plug>(resolve-both)", vim.tbl_extend("force", opts, { desc = "Choose both", remap = true }))
-  vim.keymap.set("n", "<leader>gcB", "<Plug>(resolve-both-reverse)", vim.tbl_extend("force", opts, { desc = "Choose both (reverse)", remap = true }))
-  vim.keymap.set("n", "<leader>gcm", "<Plug>(resolve-base)", vim.tbl_extend("force", opts, { desc = "Choose base", remap = true }))
-  vim.keymap.set("n", "<leader>gcn", "<Plug>(resolve-none)", vim.tbl_extend("force", opts, { desc = "Choose none", remap = true }))
-  vim.keymap.set("n", "<leader>gcd", "<Plug>(resolve-diff)", vim.tbl_extend("force", opts, { desc = "Show diff", remap = true }))
-  vim.keymap.set("n", "<leader>gcl", "<Plug>(resolve-list)", vim.tbl_extend("force", opts, { desc = "List conflicts", remap = true }))
+  vim.keymap.set("n", "]x", "<Plug>(resolve-next)",
+    vim.tbl_extend("force", opts, { desc = "Next conflict", remap = true }))
+  vim.keymap.set("n", "[x", "<Plug>(resolve-prev)",
+    vim.tbl_extend("force", opts, { desc = "Previous conflict", remap = true }))
+  vim.keymap.set("n", "<leader>gco", "<Plug>(resolve-ours)",
+    vim.tbl_extend("force", opts, { desc = "Choose ours", remap = true }))
+  vim.keymap.set("n", "<leader>gct", "<Plug>(resolve-theirs)",
+    vim.tbl_extend("force", opts, { desc = "Choose theirs", remap = true }))
+  vim.keymap.set("n", "<leader>gcb", "<Plug>(resolve-both)",
+    vim.tbl_extend("force", opts, { desc = "Choose both", remap = true }))
+  vim.keymap.set("n", "<leader>gcB", "<Plug>(resolve-both-reverse)",
+    vim.tbl_extend("force", opts, { desc = "Choose both (reverse)", remap = true }))
+  vim.keymap.set("n", "<leader>gcm", "<Plug>(resolve-base)",
+    vim.tbl_extend("force", opts, { desc = "Choose base", remap = true }))
+  vim.keymap.set("n", "<leader>gcn", "<Plug>(resolve-none)",
+    vim.tbl_extend("force", opts, { desc = "Choose none", remap = true }))
+  vim.keymap.set("n", "<leader>gcdo", "<Plug>(resolve-diff-ours)",
+    vim.tbl_extend("force", opts, { desc = "Diff ours", remap = true }))
+  vim.keymap.set("n", "<leader>gcdt", "<Plug>(resolve-diff-theirs)",
+    vim.tbl_extend("force", opts, { desc = "Diff theirs", remap = true }))
+  vim.keymap.set("n", "<leader>gcdb", "<Plug>(resolve-diff-both)",
+    vim.tbl_extend("force", opts, { desc = "Diff both", remap = true }))
+  vim.keymap.set("n", "<leader>gcl", "<Plug>(resolve-list)",
+    vim.tbl_extend("force", opts, { desc = "List conflicts", remap = true }))
 
   vim.b[bufnr].resolve_keymaps_set = true
 end
@@ -565,7 +582,9 @@ local function get_diff_command(file1, file2)
 end
 
 --- Show diffs in a floating window
-function M.show_diff()
+--- @param show_ours boolean Whether to show base ↔ ours diff
+--- @param show_theirs boolean Whether to show base ↔ theirs diff
+local function show_diff_internal(show_ours, show_theirs)
   local conflict = get_current_conflict()
   if not conflict then
     vim.notify("Not in a conflict", vim.log.levels.WARN)
@@ -577,24 +596,41 @@ function M.show_diff()
     return
   end
 
-  -- Get and run diff commands
-  local base_ours_cmd = get_diff_command(files.base_file, files.ours_file)
-  local base_theirs_cmd = get_diff_command(files.base_file, files.theirs_file)
+  -- Build output based on which diffs to show
+  local output_parts = {}
 
-  local base_ours_output = vim.fn.system(base_ours_cmd)
-  local base_theirs_output = vim.fn.system(base_theirs_cmd)
+  if show_ours then
+    local base_ours_cmd = get_diff_command(files.base_file, files.ours_file)
+    local base_ours_output = vim.fn.system(base_ours_cmd)
+    if show_theirs then table.insert(output_parts, "━━━ Base ↔ Ours ━━━") end
+    table.insert(output_parts, base_ours_output)
+  end
+
+  if show_theirs then
+    local base_theirs_cmd = get_diff_command(files.base_file, files.theirs_file)
+    local base_theirs_output = vim.fn.system(base_theirs_cmd)
+    if show_ours then table.insert(output_parts, "━━━ Base ↔ Theirs ━━━") end
+    table.insert(output_parts, base_theirs_output)
+  end
 
   -- Clean up temp files
   vim.fn.delete(files.tmpdir, "rf")
 
-  -- Build combined output with headers
-  local combined_output = "━━━ Base ↔ Ours ━━━\n"
-      .. base_ours_output
-      .. "\n━━━ Base ↔ Theirs ━━━\n"
-      .. base_theirs_output
+  -- Combine output with separator if showing both
+  local combined_output = table.concat(output_parts, "\n")
 
   -- Count newlines (gsub returns replacement count as second value)
   local _, number_of_newlines = string.gsub(combined_output, "\n", "\n")
+
+  -- Determine title based on what's shown
+  local title
+  if show_ours and show_theirs then
+    title = " Conflict Diff (Both) "
+  elseif show_ours then
+    title = " Conflict Diff (Ours) "
+  else
+    title = " Conflict Diff (Theirs) "
+  end
 
   -- Calculate floating window size (80% of editor)
   local width = math.floor(vim.o.columns * 0.8)
@@ -614,7 +650,7 @@ function M.show_diff()
     col = col,
     style = "minimal",
     border = "rounded",
-    title = " Conflict Diff ",
+    title = title,
     title_pos = "center",
   })
 
@@ -635,6 +671,21 @@ function M.show_diff()
 
   -- Move cursor to top
   vim.api.nvim_win_set_cursor(win, { 1, 0 })
+end
+
+--- Show diff of our changes from base
+function M.show_diff_ours()
+  show_diff_internal(true, false)
+end
+
+--- Show diff of theirs changes from base
+function M.show_diff_theirs()
+  show_diff_internal(false, true)
+end
+
+--- Show both diffs (ours and theirs from base)
+function M.show_diff_both()
+  show_diff_internal(true, true)
 end
 
 return M

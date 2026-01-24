@@ -9,7 +9,7 @@ A Neovim plugin for resolving merge conflicts with ease.
 - Navigate between conflicts quickly
 - Resolve conflicts with simple commands
 - Support for standard 3-way merge and diff3 formats
-- View diffs of a single conflict between base and either version in a floating window
+- View diffs between base and each version separately or together in a floating window
 - List all conflicts in quickfix window
 - Buffer-local keymaps (only active in buffers with conflicts)
 - Matchit integration for `%` jumping between conflict markers
@@ -126,9 +126,11 @@ When `default_keymaps` is enabled (keymaps are buffer-local, only active when co
 - `<leader>gcm` - Choose base/ancestor (diff3 only)
 - `<leader>gcn` - Choose none (delete conflict)
 - `<leader>gcl` - List all conflicts in quickfix window
-- `<leader>gcd` - Show diff in floating window (diff3 only)
+- `<leader>gcdo` - Show diff ours (base ↔ ours, diff3 only)
+- `<leader>gcdt` - Show diff theirs (base ↔ theirs, diff3 only)
+- `<leader>gcdb` - Show diff both (base ↔ ours and base ↔ theirs, diff3 only)
 
-The `<leader>gc` prefix displays as "Git Conflicts" in which-key.
+The `<leader>gc` prefix displays as "Git Conflicts" in which-key, and `<leader>gcd` displays as "Diff".
 
 ### Commands
 
@@ -144,7 +146,9 @@ The plugin provides the following commands:
 - `:ResolveNone` - Choose neither version
 - `:ResolveList` - List all conflicts in quickfix
 - `:ResolveDetect` - Manually detect conflicts
-- `:ResolveDiff` - Show changes made to base in our/their version in floating window (diff3 only)
+- `:ResolveDiffOurs` - Show diff of our changes from base (diff3 only)
+- `:ResolveDiffTheirs` - Show diff of theirs changes from base (diff3 only)
+- `:ResolveDiffBoth` - Show both diffs in floating window (diff3 only)
 
 ### Custom Keymaps
 
@@ -156,8 +160,9 @@ require("resolve").setup({
 })
 
 -- Example: Set custom keymaps using <Plug> mappings
--- Register the group for which-key (optional)
+-- Register groups for which-key (optional)
 vim.keymap.set("n", "<leader>gc", "", { desc = "+Git Conflicts" })
+vim.keymap.set("n", "<leader>gcd", "", { desc = "+Diff" })
 
 vim.keymap.set("n", "]c", "<Plug>(resolve-next)", { desc = "Next conflict" })
 vim.keymap.set("n", "[c", "<Plug>(resolve-prev)", { desc = "Previous conflict" })
@@ -167,7 +172,9 @@ vim.keymap.set("n", "<leader>gcb", "<Plug>(resolve-both)", { desc = "Choose both
 vim.keymap.set("n", "<leader>gcB", "<Plug>(resolve-both-reverse)", { desc = "Choose both reverse" })
 vim.keymap.set("n", "<leader>gcm", "<Plug>(resolve-base)", { desc = "Choose base" })
 vim.keymap.set("n", "<leader>gcn", "<Plug>(resolve-none)", { desc = "Choose none" })
-vim.keymap.set("n", "<leader>gcd", "<Plug>(resolve-diff)", { desc = "Show diff" })
+vim.keymap.set("n", "<leader>gcdo", "<Plug>(resolve-diff-ours)", { desc = "Diff ours" })
+vim.keymap.set("n", "<leader>gcdt", "<Plug>(resolve-diff-theirs)", { desc = "Diff theirs" })
+vim.keymap.set("n", "<leader>gcdb", "<Plug>(resolve-diff-both)", { desc = "Diff both" })
 vim.keymap.set("n", "<leader>gcl", "<Plug>(resolve-list)", { desc = "List conflicts" })
 ```
 
@@ -183,7 +190,9 @@ The following `<Plug>` mappings are always available for custom keybindings:
 - `<Plug>(resolve-both-reverse)` - Choose both versions (theirs then ours)
 - `<Plug>(resolve-base)` - Choose base version
 - `<Plug>(resolve-none)` - Choose neither version
-- `<Plug>(resolve-diff)` - Show diff view
+- `<Plug>(resolve-diff-ours)` - Show diff ours (base ↔ ours)
+- `<Plug>(resolve-diff-theirs)` - Show diff theirs (base ↔ theirs)
+- `<Plug>(resolve-diff-both)` - Show both diffs
 - `<Plug>(resolve-list)` - List conflicts in quickfix
 
 **Note:** The default keymaps use `<leader>gc` prefix (git conflicts) to avoid conflicts with LSP-specific keybindings that may be dynamically set under `<leader>c` when language servers attach.
@@ -202,9 +211,10 @@ The plugin integrates with Vim's matchit to allow jumping between conflict marke
 
 For diff3-style conflicts, you can view diffs showing what each side changed from the base version. This helps understand the actual changes when the differences are subtle or close together.
 
-Press `<leader>gcd` (or `:ResolveDiff`) to open a floating window displaying:
-- Base ↔ Ours (what your side changed)
-- Base ↔ Theirs (what their side changed)
+Three diff views are available:
+- `<leader>gcdo` (or `:ResolveDiffOurs`) - Show only base ↔ ours diff
+- `<leader>gcdt` (or `:ResolveDiffTheirs`) - Show only base ↔ theirs diff
+- `<leader>gcdb` (or `:ResolveDiffBoth`) - Show both diffs in one window
 
 The diff view uses [delta](https://github.com/dandavison/delta) for beautiful syntax highlighting with intra-line change emphasis. Press `q` or `<Esc>` to close the floating window.
 

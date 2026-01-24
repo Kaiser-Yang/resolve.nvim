@@ -48,6 +48,14 @@ vim.api.nvim_create_user_command("ResolveDetect", function()
   require("resolve").detect_conflicts()
 end, { desc = "Manually detect conflicts" })
 
-vim.api.nvim_create_user_command("ResolveDiff", function()
-  require("resolve").show_diff()
-end, { desc = "Show conflict diffs in floating window" })
+vim.api.nvim_create_user_command("ResolveDiffOurs", function()
+  require("resolve").show_diff_ours()
+end, { desc = "Show diff of ours changes from base in floating window" })
+
+vim.api.nvim_create_user_command("ResolveDiffTheirs", function()
+  require("resolve").show_diff_theirs()
+end, { desc = "Show diff of theirs changes from base in floating window" })
+
+vim.api.nvim_create_user_command("ResolveDiffBoth", function()
+  require("resolve").show_diff_both()
+end, { desc = "Show both diffs in floating window" })
