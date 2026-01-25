@@ -59,3 +59,11 @@ end, { desc = "Show diff of theirs changes from base in floating window" })
 vim.api.nvim_create_user_command("ResolveDiffBoth", function()
   require("resolve").show_diff_both()
 end, { desc = "Show both diffs in floating window" })
+
+vim.api.nvim_create_user_command("ResolveDiffOursTheirs", function()
+  require("resolve").show_diff_ours_vs_theirs()
+end, { desc = "Show diff between ours and theirs in floating window" })
+
+vim.api.nvim_create_user_command("ResolveDiffTheirsOurs", function()
+  require("resolve").show_diff_theirs_vs_ours()
+end, { desc = "Show diff between theirs and ours in floating window" })

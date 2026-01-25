@@ -76,6 +76,10 @@ local function setup_plug_mappings()
   vim.keymap.set("n", "<Plug>(resolve-diff-ours)", M.show_diff_ours, { desc = "Show diff ours (Resolve)" })
   vim.keymap.set("n", "<Plug>(resolve-diff-theirs)", M.show_diff_theirs, { desc = "Show diff theirs (Resolve)" })
   vim.keymap.set("n", "<Plug>(resolve-diff-both)", M.show_diff_both, { desc = "Show diff both (Resolve)" })
+  vim.keymap.set("n", "<Plug>(resolve-diff-vs)", M.show_diff_ours_vs_theirs,
+    { desc = "Show diff ours vs theirs (Resolve)" })
+  vim.keymap.set("n", "<Plug>(resolve-diff-vs-reverse)", M.show_diff_theirs_vs_ours,
+    { desc = "Show diff theirs vs ours (Resolve)" })
   vim.keymap.set("n", "<Plug>(resolve-list)", M.list_conflicts, { desc = "List conflicts (Resolve)" })
 end
 
@@ -114,6 +118,10 @@ local function setup_buffer_keymaps(bufnr)
     vim.tbl_extend("force", opts, { desc = "Diff theirs", remap = true }))
   vim.keymap.set("n", "<leader>gcdb", "<Plug>(resolve-diff-both)",
     vim.tbl_extend("force", opts, { desc = "Diff both", remap = true }))
+  vim.keymap.set("n", "<leader>gcdv", "<Plug>(resolve-diff-vs)",
+    vim.tbl_extend("force", opts, { desc = "Diff ours vs theirs", remap = true }))
+  vim.keymap.set("n", "<leader>gcdV", "<Plug>(resolve-diff-vs-reverse)",
+    vim.tbl_extend("force", opts, { desc = "Diff theirs vs ours", remap = true }))
   vim.keymap.set("n", "<leader>gcl", "<Plug>(resolve-list)",
     vim.tbl_extend("force", opts, { desc = "List conflicts", remap = true }))
 
@@ -142,6 +150,8 @@ local function remove_buffer_keymaps(bufnr)
     "<leader>gcdo",
     "<leader>gcdt",
     "<leader>gcdb",
+    "<leader>gcdv",
+    "<leader>gcdV",
     "<leader>gcl",
   }
 
@@ -648,48 +658,6 @@ function M.list_conflicts()
   vim.cmd("copen")
 end
 
---- Extract conflict sections to temporary files
---- @param conflict table Conflict data
---- @return table|nil Table with base_file, ours_file, theirs_file paths, or nil if not diff3
-local function extract_conflict_to_files(conflict)
-  if not conflict.ancestor then
-    vim.notify("Not a diff3-style conflict (no base version)", vim.log.levels.WARN)
-    return nil
-  end
-
-  local bufnr = vim.api.nvim_get_current_buf()
-
-  -- Note: conflict positions are 1-indexed, nvim_buf_get_lines uses 0-indexed
-  -- Extract ours section (between <<<<<<< and |||||||, excluding markers)
-  local ours_lines = vim.api.nvim_buf_get_lines(bufnr, conflict.ours_start, conflict.ancestor - 1, false)
-
-  -- Extract base section (between ||||||| and =======, excluding markers)
-  local base_lines = vim.api.nvim_buf_get_lines(bufnr, conflict.ancestor, conflict.separator - 1, false)
-
-  -- Extract theirs section (between ======= and >>>>>>>, excluding markers)
-  local theirs_lines = vim.api.nvim_buf_get_lines(bufnr, conflict.separator, conflict.theirs_end - 1, false)
-
-  -- Create temporary files
-  local tmpdir = vim.fn.tempname()
-  vim.fn.mkdir(tmpdir, "p")
-
-  local base_file = tmpdir .. "/base"
-  local ours_file = tmpdir .. "/ours"
-  local theirs_file = tmpdir .. "/theirs"
-
-  -- Write sections to files
-  vim.fn.writefile(base_lines, base_file)
-  vim.fn.writefile(ours_lines, ours_file)
-  vim.fn.writefile(theirs_lines, theirs_file)
-
-  return {
-    base_file = base_file,
-    ours_file = ours_file,
-    theirs_file = theirs_file,
-    tmpdir = tmpdir,
-  }
-end
-
 --- Get the diff command to run
 --- @param file1 string First file path
 --- @param file2 string Second file path
@@ -704,66 +672,12 @@ local function get_diff_command(file1, file2)
   )
 end
 
---- Show diffs in a floating window
---- @param show_ours boolean Whether to show base ↔ ours diff
---- @param show_theirs boolean Whether to show base ↔ theirs diff
-local function show_diff_internal(show_ours, show_theirs)
-  local conflict = get_current_conflict()
-  if not conflict then
-    vim.notify("Not in a conflict", vim.log.levels.WARN)
-    return
-  end
-
-  local files = extract_conflict_to_files(conflict)
-  if not files then
-    return
-  end
-
-  -- Build output based on which diffs to show
-  local output_parts = {}
-
-  if show_ours then
-    local base_ours_cmd = get_diff_command(files.base_file, files.ours_file)
-    local base_ours_output = vim.fn.system(base_ours_cmd)
-    if vim.v.shell_error ~= 0 then
-      vim.fn.delete(files.tmpdir, "rf")
-      vim.notify("Failed to generate diff (ours): command exited with status " .. vim.v.shell_error, vim.log.levels.ERROR)
-      return
-    end
-    if show_theirs then table.insert(output_parts, "━━━ Base ↔ Ours ━━━") end
-    table.insert(output_parts, base_ours_output)
-  end
-
-  if show_theirs then
-    local base_theirs_cmd = get_diff_command(files.base_file, files.theirs_file)
-    local base_theirs_output = vim.fn.system(base_theirs_cmd)
-    if vim.v.shell_error ~= 0 then
-      vim.fn.delete(files.tmpdir, "rf")
-      vim.notify("Failed to generate diff (theirs): command exited with status " .. vim.v.shell_error, vim.log.levels.ERROR)
-      return
-    end
-    if show_ours then table.insert(output_parts, "━━━ Base ↔ Theirs ━━━") end
-    table.insert(output_parts, base_theirs_output)
-  end
-
-  -- Clean up temp files
-  vim.fn.delete(files.tmpdir, "rf")
-
-  -- Combine output with separator if showing both
-  local combined_output = table.concat(output_parts, "\n")
-
+--- Display diff output in a floating window
+--- @param output string The diff output to display
+--- @param title string The window title
+local function display_diff_window(output, title)
   -- Count newlines (gsub returns replacement count as second value)
-  local _, number_of_newlines = string.gsub(combined_output, "\n", "\n")
-
-  -- Determine title based on what's shown
-  local title
-  if show_ours and show_theirs then
-    title = " Conflict Diff (Both) "
-  elseif show_ours then
-    title = " Conflict Diff (Ours) "
-  else
-    title = " Conflict Diff (Theirs) "
-  end
+  local _, number_of_newlines = string.gsub(output, "\n", "\n")
 
   -- Calculate floating window size (80% of editor)
   local width = math.floor(vim.o.columns * 0.8)
@@ -790,7 +704,7 @@ local function show_diff_internal(show_ours, show_theirs)
   -- Use nvim_open_term to create a pseudo-terminal that interprets ANSI codes
   -- This gives us colours without an actual process (no "[Process exited]" message)
   local term_chan = vim.api.nvim_open_term(buf, {})
-  vim.api.nvim_chan_send(term_chan, combined_output)
+  vim.api.nvim_chan_send(term_chan, output)
 
   -- Set up keymaps to close the floating window
   local close_keys = { "q", "<Esc>" }
@@ -806,19 +720,148 @@ local function show_diff_internal(show_ours, show_theirs)
   vim.api.nvim_win_set_cursor(win, { 1, 0 })
 end
 
+-- Helper function to generate a single diff and update output
+--- @param file1 string First file path
+--- @param file2 string Second file path
+--- @param label string Label for this diff (e.g., "Base ↔ Ours")
+--- @param output_parts table Table to append output to
+--- @param multiple boolean Whether multiple diffs are being shown
+--- @param current_title string|nil Current title (nil indicates there has been an error)
+--- @return string|nil New title, or nil on error
+local function generate_and_add_diff(file1, file2, label, output_parts, multiple, current_title)
+  if current_title then
+    local cmd = get_diff_command(file1, file2)
+    local output = vim.fn.system(cmd)
+    if vim.v.shell_error ~= 0 then
+      vim.notify("Failed to generate diff (" .. label .. "): command exited with status " .. vim.v.shell_error,
+        vim.log.levels.ERROR)
+      return nil
+    end
+
+    if multiple then
+      table.insert(output_parts, "━━━ " .. label .. " ━━━")
+    else
+      current_title = " Conflict Diff (" .. label .. ") "
+    end
+    table.insert(output_parts, output)
+  end
+
+  return current_title
+end
+
+--- Show diffs in a floating window
+--- @param show_base_ours boolean Whether to show base → ours diff
+--- @param show_base_theirs boolean Whether to show base → theirs diff
+--- @param show_ours_theirs boolean Whether to show ours → theirs diff
+--- @param show_theirs_ours boolean Whether to show theirs → ours diff
+local function show_diff_internal(show_base_ours, show_base_theirs, show_ours_theirs, show_theirs_ours)
+  local conflict = get_current_conflict()
+  if not conflict then
+    vim.notify("Not in a conflict", vim.log.levels.WARN)
+    return
+  end
+
+  -- Check if we need diff3 (base comparisons require ancestor)
+  if (show_base_ours or show_base_theirs) and not conflict.ancestor then
+    vim.notify("Not a diff3-style conflict (no base version)", vim.log.levels.WARN)
+    return
+  end
+
+  local bufnr = vim.api.nvim_get_current_buf()
+
+  -- Determine which sections we need to extract
+  local need_ours = show_base_ours or show_ours_theirs or show_theirs_ours
+  local need_base = show_base_ours or show_base_theirs
+  local need_theirs = show_base_theirs or show_ours_theirs or show_theirs_ours
+
+  -- Create temporary directory for files
+  local tmpdir = vim.fn.tempname()
+  vim.fn.mkdir(tmpdir, "p")
+
+  -- Extract sections to temporary files as needed
+  local ours_file, base_file, theirs_file
+
+  if need_ours then
+    local ours_end = conflict.ancestor and (conflict.ancestor - 1) or (conflict.separator - 1)
+    local ours_lines = vim.api.nvim_buf_get_lines(bufnr, conflict.ours_start, ours_end, false)
+    ours_file = tmpdir .. "/ours"
+    vim.fn.writefile(ours_lines, ours_file)
+  end
+
+  if need_base then
+    local base_lines = vim.api.nvim_buf_get_lines(bufnr, conflict.ancestor, conflict.separator - 1, false)
+    base_file = tmpdir .. "/base"
+    vim.fn.writefile(base_lines, base_file)
+  end
+
+  if need_theirs then
+    local theirs_lines = vim.api.nvim_buf_get_lines(bufnr, conflict.separator, conflict.theirs_end - 1, false)
+    theirs_file = tmpdir .. "/theirs"
+    vim.fn.writefile(theirs_lines, theirs_file)
+  end
+
+  -- Determine if we're showing multiple diffs (omit headers if only one)
+  local multiple = (show_base_ours and 1 or 0) + (show_base_theirs and 1 or 0) + (show_ours_theirs and 1 or 0) + (show_theirs_ours and 1 or 0) > 1
+
+  -- Build output based on which diffs to show
+  local output_parts = {}
+
+  ---@type string|nil
+  local title = " Conflict Diff " -- nil indicates we have encountered an error
+
+  if show_base_ours then
+    title = generate_and_add_diff(base_file, ours_file, "Base → Ours", output_parts, multiple, title)
+  end
+
+  if show_base_theirs then
+    title = generate_and_add_diff(base_file, theirs_file, "Base → Theirs", output_parts, multiple, title)
+  end
+
+  if show_ours_theirs then
+    title = generate_and_add_diff(ours_file, theirs_file, "Ours → Theirs", output_parts, multiple, title)
+  end
+
+  if show_theirs_ours then
+    title = generate_and_add_diff(theirs_file, ours_file, "Theirs → Ours", output_parts, multiple, title)
+  end
+
+  -- Clean up temp files
+  vim.fn.delete(tmpdir, "rf")
+
+  -- Early return if any diff failed
+  if not title then
+    return
+  end
+
+  -- Combine output
+  local combined_output = table.concat(output_parts, "\n")
+
+  display_diff_window(combined_output, title)
+end
+
 --- Show diff of our changes from base
 function M.show_diff_ours()
-  show_diff_internal(true, false)
+  show_diff_internal(true, false, false, false)
 end
 
 --- Show diff of theirs changes from base
 function M.show_diff_theirs()
-  show_diff_internal(false, true)
+  show_diff_internal(false, true, false, false)
 end
 
 --- Show both diffs (ours and theirs from base)
 function M.show_diff_both()
-  show_diff_internal(true, true)
+  show_diff_internal(true, true, false, false)
+end
+
+--- Show direct diff between ours and theirs (no base required)
+function M.show_diff_ours_vs_theirs()
+  show_diff_internal(false, false, true, false)
+end
+
+--- Show direct diff between theirs and ours (no base required)
+function M.show_diff_theirs_vs_ours()
+  show_diff_internal(false, false, false, true)
 end
 
 return M
