@@ -1,6 +1,14 @@
-# resolve.nvim
+<h1 align="center">resolve.nvim</h1>
 
-A Neovim plugin for resolving merge conflicts with ease.
+<p align="center">A Neovim plugin for resolving merge conflicts with ease.</p>
+
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/a6b55e7a-c490-4a43-8562-1851b93610fd" width="876" controls muted loop>
+    ![Demo Screencast](https://github.com/user-attachments/assets/a6b55e7a-c490-4a43-8562-1851b93610fd)
+  </video>
+</p>
+
+You can watch [a three-minute demo on YouTube](https://www.youtube.com/watch?v=8twR5lfrGN4)
 
 ## Features
 
@@ -15,6 +23,17 @@ A Neovim plugin for resolving merge conflicts with ease.
 - Matchit integration for `%` jumping between conflict markers
 - `<Plug>` mappings for easy custom keybinding
 - Customisable hooks/callbacks on conflict detection
+
+## Development
+
+This plugin was inspired by prior work:
+
+- [conflict-marker.vim](https://github.com/rhysd/conflict-marker.vim)
+- [git-conflict.nvim](https://github.com/akinsho/git-conflict.nvim)
+
+The feature I was missing in other plugins was a quick way to compare the local or remote side of the conflict with the common base (which is included in conflicted files if enabled, e.g. by the `merge.conflictStyle` setting in git set to `diff3`).
+
+Development was aided by Claude Code. Pull requests are welcome. If you use AI coding tools, please read and understand all code changes before submitting them as a PR.
 
 ## Requirements
 
