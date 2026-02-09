@@ -67,3 +67,14 @@ end, { desc = "Show diff between ours and theirs in floating window" })
 vim.api.nvim_create_user_command("ResolveDiffTheirsOurs", function()
   require("resolve").show_diff_theirs_vs_ours()
 end, { desc = "Show diff between theirs and ours in floating window" })
+
+vim.api.nvim_create_user_command("ResolveToggleAutoDetect", function(opts)
+  local arg = opts.args
+  if arg == "" then
+    arg = nil
+  end
+  require("resolve").toggle_auto_detect(arg)
+end, { 
+  nargs = "?",
+  desc = "Toggle automatic conflict detection (true/false, on/off, 0/non-zero, or no arg to toggle)" 
+})

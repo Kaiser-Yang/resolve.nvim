@@ -17,6 +17,8 @@ local config = {
     theirs = "Theirs",
     base = "Base",
   },
+  -- Enable automatic conflict detection on text changes
+  auto_detect_enabled = true,
   -- Callback function called when conflicts are detected
   -- Receives: { bufnr = number, conflicts = table }
   on_conflict_detected = nil,
@@ -24,6 +26,9 @@ local config = {
   -- Receives: { bufnr = number }
   on_conflicts_resolved = nil,
 }
+
+-- Store autocmd ID for TextChanged to enable/disable it
+local text_changed_autocmd_id = nil
 
 --- Set up highlight groups with colours appropriate for the current background
 local function setup_highlights()
@@ -240,17 +245,19 @@ function M.setup(opts)
   -- Add TextChanged autocmd to re-detect conflicts when user undoes
   -- This uses silent mode to avoid spamming notifications
   -- Only TextChanged (not TextChangedI) to avoid scanning during active typing
-  vim.api.nvim_create_autocmd("TextChanged", {
-    group = augroup,
-    pattern = "*",
-    callback = function()
-      -- Only scan normal buffers (not special buffers)
-      local buftype = vim.bo.buftype
-      if buftype == "" or buftype == "acwrite" then
-        M.detect_conflicts(true)  -- silent mode to avoid notification spam
-      end
-    end,
-  })
+  if config.auto_detect_enabled then
+    text_changed_autocmd_id = vim.api.nvim_create_autocmd("TextChanged", {
+      group = augroup,
+      pattern = "*",
+      callback = function()
+        -- Only scan normal buffers (not special buffers)
+        local buftype = vim.bo.buftype
+        if buftype == "" or buftype == "acwrite" then
+          M.detect_conflicts(true)  -- silent mode to avoid notification spam
+        end
+      end,
+    })
+  end
 
   -- Immediately detect conflicts in the current buffer for aggressive lazy loading
   M.detect_conflicts(true)  -- silent mode for initial detection
@@ -403,6 +410,74 @@ function M.detect_conflicts(silent)
   end
 
   return conflicts
+end
+
+--- Toggle automatic conflict detection on text changes
+--- @param enable string|boolean|number|nil Toggle state: true/"on"/non-zero to enable, false/"off"/0 to disable, nil to toggle
+function M.toggle_auto_detect(enable)
+  local new_state
+  
+  -- Parse the enable parameter
+  if enable == nil then
+    -- No parameter provided, toggle current state
+    new_state = not config.auto_detect_enabled
+  elseif type(enable) == "boolean" then
+    new_state = enable
+  elseif type(enable) == "string" then
+    local lower = enable:lower()
+    if lower == "on" or lower == "true" then
+      new_state = true
+    elseif lower == "off" or lower == "false" then
+      new_state = false
+    else
+      -- Try to convert to number
+      local num = tonumber(enable)
+      if num then
+        new_state = num ~= 0
+      else
+        vim.notify("Invalid parameter: " .. enable .. ". Use true/false, on/off, or 0/non-zero", vim.log.levels.ERROR)
+        return
+      end
+    end
+  elseif type(enable) == "number" then
+    new_state = enable ~= 0
+  else
+    vim.notify("Invalid parameter type. Use true/false, on/off, or 0/non-zero", vim.log.levels.ERROR)
+    return
+  end
+  
+  -- If state hasn't changed, nothing to do
+  if new_state == config.auto_detect_enabled then
+    vim.notify("Auto-detect is already " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
+    return
+  end
+  
+  config.auto_detect_enabled = new_state
+  
+  local augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = false })
+  
+  if new_state then
+    -- Enable: Create the TextChanged autocmd
+    text_changed_autocmd_id = vim.api.nvim_create_autocmd("TextChanged", {
+      group = augroup,
+      pattern = "*",
+      callback = function()
+        -- Only scan normal buffers (not special buffers)
+        local buftype = vim.bo.buftype
+        if buftype == "" or buftype == "acwrite" then
+          M.detect_conflicts(true)  -- silent mode to avoid notification spam
+        end
+      end,
+    })
+    vim.notify("Auto-detect enabled", vim.log.levels.INFO)
+  else
+    -- Disable: Delete the TextChanged autocmd
+    if text_changed_autocmd_id then
+      vim.api.nvim_del_autocmd(text_changed_autocmd_id)
+      text_changed_autocmd_id = nil
+    end
+    vim.notify("Auto-detect disabled", vim.log.levels.INFO)
+  end
 end
 
 --- Highlight conflicts in the current buffer

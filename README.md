@@ -95,6 +95,8 @@ require("resolve").setup({
     theirs = "Theirs",
     base = "Base",
   },
+  -- Enable automatic conflict detection on text changes (e.g., after undo)
+  auto_detect_enabled = true,
   -- Callback function called when conflicts are detected
   -- Receives: { bufnr = number, conflicts = table }
   on_conflict_detected = nil,
@@ -226,11 +228,30 @@ The plugin provides the following commands:
 - `:ResolveNone` - Choose neither version
 - `:ResolveList` - List all conflicts in quickfix
 - `:ResolveDetect` - Manually detect conflicts
+- `:ResolveToggleAutoDetect [on|off]` - Toggle automatic conflict detection on text changes
 - `:ResolveDiffOurs` - Show diff of our changes from base (diff3 only)
 - `:ResolveDiffTheirs` - Show diff of their changes from base (diff3 only)
 - `:ResolveDiffBoth` - Show both diffs in floating window (diff3 only)
 - `:ResolveDiffOursTheirs` - Show diff ours → theirs (works without diff3)
 - `:ResolveDiffTheirsOurs` - Show diff theirs → ours (works without diff3)
+
+#### Automatic Conflict Detection
+
+By default, the plugin automatically re-detects conflicts when text changes (e.g., after undo). You can toggle this feature:
+
+- `:ResolveToggleAutoDetect` - Toggle current state
+- `:ResolveToggleAutoDetect on` or `:ResolveToggleAutoDetect true` - Enable auto-detection
+- `:ResolveToggleAutoDetect off` or `:ResolveToggleAutoDetect false` - Disable auto-detection
+- `:ResolveToggleAutoDetect 1` - Enable (any non-zero number enables)
+- `:ResolveToggleAutoDetect 0` - Disable
+
+You can also disable it permanently in your configuration:
+
+```lua
+require("resolve").setup({
+  auto_detect_enabled = false,
+})
+```
 
 ### Custom Keymaps
 
