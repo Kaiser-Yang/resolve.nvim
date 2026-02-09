@@ -239,11 +239,16 @@ function M.setup(opts)
 
   -- Add TextChanged autocmd to re-detect conflicts when user undoes
   -- This uses silent mode to avoid spamming notifications
-  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+  -- Only TextChanged (not TextChangedI) to avoid scanning during active typing
+  vim.api.nvim_create_autocmd("TextChanged", {
     group = augroup,
     pattern = "*",
     callback = function()
-      M.detect_conflicts(true)  -- silent mode to avoid notification spam
+      -- Only scan normal buffers (not special buffers)
+      local buftype = vim.bo.buftype
+      if buftype == "" or buftype == "acwrite" then
+        M.detect_conflicts(true)  -- silent mode to avoid notification spam
+      end
     end,
   })
 
