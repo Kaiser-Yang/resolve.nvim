@@ -90,8 +90,9 @@ vim.api.nvim_create_user_command("ResolveToggleAutoDetect", function(opts)
     end
   end
   
-  require("resolve").toggle_auto_detect(enable)
+  require("resolve").toggle_auto_detect(enable, opts.bang)
 end, { 
   nargs = "?",
-  desc = "Toggle automatic conflict detection (true/false, on/off, 0/non-zero, or no arg to toggle)" 
+  bang = true,
+  desc = "Toggle automatic conflict detection (true/false, on/off, 0/non-zero, or no arg to toggle). Use ! to suppress notification." 
 })

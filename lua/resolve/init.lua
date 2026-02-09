@@ -147,11 +147,11 @@ local function setup_autocmd(augroup)
         return
       end
       
-      -- For TextChanged, use silent mode to avoid notification spam
+      -- For TextChanged, detect conflicts
       if ev.event == "TextChanged" then
-        M.detect_conflicts(true)  -- silent mode
+        M.detect_conflicts()
       else
-        -- For other events, detect normally (with notification)
+        -- For other events, detect normally
         M.detect_conflicts()
       end
     end,
@@ -422,15 +422,12 @@ local function get_current_conflict()
 end
 
 --- Detect conflicts and highlight them (for display purposes)
---- @param silent boolean|nil If true, suppress notification
-function M.detect_conflicts(silent)
+function M.detect_conflicts()
   local bufnr = vim.api.nvim_get_current_buf()
   local conflicts = scan_conflicts()
 
   if #conflicts > 0 then
-    if not silent then
-      vim.notify(string.format("Found %d conflict(s)", #conflicts), vim.log.levels.INFO)
-    end
+    vim.notify(string.format("Found %d conflict(s)", #conflicts), vim.log.levels.INFO)
     M.highlight_conflicts(conflicts)
 
     -- Set up buffer-local keymaps if enabled
@@ -473,7 +470,8 @@ end
 
 --- Toggle automatic conflict detection on text changes
 --- @param enable boolean|nil Enable (true), disable (false), or toggle (nil)
-function M.toggle_auto_detect(enable)
+--- @param silent boolean|nil If true, suppress notification
+function M.toggle_auto_detect(enable, silent)
   local new_state
   
   if enable == nil then
@@ -485,7 +483,9 @@ function M.toggle_auto_detect(enable)
   
   -- If state hasn't changed, nothing to do
   if new_state == config.auto_detect_enabled then
-    vim.notify("Auto-detect is already " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
+    if not silent then
+      vim.notify("Auto-detect is already " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
+    end
     return
   end
   
@@ -506,7 +506,9 @@ function M.toggle_auto_detect(enable)
     end
   end
   
-  vim.notify("Auto-detect " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
+  if not silent then
+    vim.notify("Auto-detect " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
+  end
 end
 
 --- Highlight conflicts in the current buffer

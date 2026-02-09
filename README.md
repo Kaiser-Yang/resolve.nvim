@@ -250,7 +250,9 @@ The plugin provides the following commands:
 By default, the plugin automatically re-detects conflicts when text changes (e.g., after undo). You can toggle this feature:
 
 - `:ResolveToggleAutoDetect` - Toggle current state
+- `:ResolveToggleAutoDetect!` - Toggle current state (silent, no notification)
 - `:ResolveToggleAutoDetect on` or `:ResolveToggleAutoDetect true` - Enable auto-detection
+- `:ResolveToggleAutoDetect! on` - Enable auto-detection (silent)
 - `:ResolveToggleAutoDetect off` or `:ResolveToggleAutoDetect false` - Disable auto-detection
 - `:ResolveToggleAutoDetect 1` - Enable (any non-zero number enables)
 - `:ResolveToggleAutoDetect 0` - Disable
