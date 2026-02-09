@@ -88,6 +88,25 @@ require("resolve").setup({
   },
   -- Set to false to disable default keymaps
   default_keymaps = true,
+  -- Labels for diff view window titles
+  -- Useful for rebasing where "incoming" is actually "ours"
+  diff_view_labels = {
+    ours = "Ours",
+    theirs = "Theirs",
+    base = "Base",
+  },
+  -- Enable automatic conflict detection
+  auto_detect_enabled = true,
+  -- Patterns for buffers to skip conflict detection (Lua patterns)
+  skip_patterns = {
+    buftype = { "." },  -- Skip any buffer with non-empty buftype (terminals, help, etc)
+    filetype = {},      -- No filetype skips by default
+  },
+  -- Custom function to determine if a buffer should be skipped
+  -- Receives: bufnr (number)
+  -- Returns: boolean (true to skip, false to detect)
+  -- Default checks for readonly and unlisted buffers
+  should_skip = nil,
   -- Callback function called when conflicts are detected
   -- Receives: { bufnr = number, conflicts = table }
   on_conflict_detected = nil,
@@ -96,6 +115,22 @@ require("resolve").setup({
   on_conflicts_resolved = nil,
 })
 ```
+
+### Customizing Diff View Labels
+
+You can customize the labels shown in diff view window titles. This is particularly useful when rebasing, where the terms "ours" and "theirs" can be confusing:
+
+```lua
+require("resolve").setup({
+  diff_view_labels = {
+    ours = "Current",
+    theirs = "Incoming",
+    base = "Base",
+  },
+})
+```
+
+With this configuration, diff windows will show titles like "Current → Incoming" instead of "Ours → Theirs".
 
 ### Theming and Highlights
 
@@ -203,11 +238,34 @@ The plugin provides the following commands:
 - `:ResolveNone` - Choose neither version
 - `:ResolveList` - List all conflicts in quickfix
 - `:ResolveDetect` - Manually detect conflicts
+- `:ResolveToggleAutoDetect [on|off]` - Toggle automatic conflict detection on text changes
 - `:ResolveDiffOurs` - Show diff of our changes from base (diff3 only)
 - `:ResolveDiffTheirs` - Show diff of their changes from base (diff3 only)
 - `:ResolveDiffBoth` - Show both diffs in floating window (diff3 only)
 - `:ResolveDiffOursTheirs` - Show diff ours → theirs (works without diff3)
 - `:ResolveDiffTheirsOurs` - Show diff theirs → ours (works without diff3)
+
+#### Automatic Conflict Detection
+
+By default, the plugin automatically re-detects conflicts when text changes (e.g., after undo). You can toggle this feature:
+
+- `:ResolveToggleAutoDetect` - Toggle current state
+- `:ResolveToggleAutoDetect!` - Toggle current state (silent, no notification)
+- `:ResolveToggleAutoDetect on` or `:ResolveToggleAutoDetect true` - Enable auto-detection
+- `:ResolveToggleAutoDetect! on` - Enable auto-detection (silent)
+- `:ResolveToggleAutoDetect off` or `:ResolveToggleAutoDetect false` - Disable auto-detection
+- `:ResolveToggleAutoDetect 1` - Enable (any non-zero number enables)
+- `:ResolveToggleAutoDetect 0` - Disable
+
+When enabling auto-detection, the plugin immediately scans the current buffer for conflicts.
+
+You can also disable it permanently in your configuration:
+
+```lua
+require("resolve").setup({
+  auto_detect_enabled = false,
+})
+```
 
 ### Custom Keymaps
 
@@ -257,6 +315,7 @@ The following `<Plug>` mappings are always available for custom keybindings:
 - `<Plug>(resolve-diff-vs)` - Show diff ours → theirs
 - `<Plug>(resolve-diff-vs-reverse)` - Show diff theirs → ours
 - `<Plug>(resolve-list)` - List conflicts in quickfix
+- `<Plug>(resolve-toggle-auto-detect)` - Toggle automatic conflict detection
 
 **Note:** The default keymaps use `<leader>gc` prefix (git conflicts) to avoid conflicts with LSP-specific keybindings that may be dynamically set under `<leader>c` when language servers attach.
 

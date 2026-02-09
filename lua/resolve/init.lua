@@ -11,6 +11,24 @@ local config = {
   },
   -- Keymaps (set to false to disable default keymaps)
   default_keymaps = true,
+  -- Labels for diff view window titles
+  diff_view_labels = {
+    ours = "Ours",
+    theirs = "Theirs",
+    base = "Base",
+  },
+  -- Enable automatic conflict detection (controls whether detection autocmd is created)
+  auto_detect_enabled = true,
+  -- Patterns for buffers to skip conflict detection (Lua patterns)
+  skip_patterns = {
+    buftype = { "." },  -- Skip any buffer with non-empty buftype (terminals, help, etc)
+    filetype = {},      -- No filetype skips by default
+  },
+  -- Custom function to determine if a buffer should be skipped
+  -- Receives: bufnr (number)
+  -- Returns: boolean (true to skip, false to detect)
+  -- Default checks for readonly and unlisted buffers
+  should_skip = nil,
   -- Callback function called when conflicts are detected
   -- Receives: { bufnr = number, conflicts = table }
   on_conflict_detected = nil,
@@ -18,6 +36,9 @@ local config = {
   -- Receives: { bufnr = number }
   on_conflicts_resolved = nil,
 }
+
+-- Store augroup to use in toggle function
+local resolve_augroup = nil
 
 --- Set up highlight groups with colours appropriate for the current background
 local function setup_highlights()
@@ -63,6 +84,75 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "ResolveAncestorSection", vim.tbl_extend("force", colors.ancestor_section, { default = true }))
 end
 
+--- Helper function to check if buffer should be skipped
+--- @param bufnr number Buffer number to check
+--- @return boolean True if buffer should be skipped
+local function should_skip_buffer(bufnr)
+  -- Check buftype patterns
+  local buftype = vim.bo[bufnr].buftype
+  for _, pattern in ipairs(config.skip_patterns.buftype) do
+    if buftype:match(pattern) then
+      return true
+    end
+  end
+  
+  -- Check filetype patterns
+  local filetype = vim.bo[bufnr].filetype
+  for _, pattern in ipairs(config.skip_patterns.filetype) do
+    if filetype:match(pattern) then
+      return true
+    end
+  end
+  
+  -- Use custom should_skip function if provided
+  if config.should_skip then
+    return config.should_skip(bufnr)
+  end
+  
+  -- Default checks: readonly and unlisted buffers
+  if vim.bo[bufnr].readonly then
+    return true
+  end
+  
+  if not vim.api.nvim_buf_is_loaded(bufnr) or not vim.fn.buflisted(bufnr) then
+    return true
+  end
+  
+  return false
+end
+
+--- Helper function to setup all autocmds (conflict detection and highlights)
+--- @param augroup number The augroup ID
+--- @return number The autocmd ID
+local function setup_autocmd(augroup)
+  -- Re-apply highlights when colour scheme changes
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    group = augroup,
+    pattern = "*",
+    callback = setup_highlights,
+  })
+  
+  -- Build event list - always include TextChanged if auto-detect is enabled
+  local events = { "BufRead", "BufEnter", "FileChangedShellPost", "TextChanged" }
+  
+  -- Create a single autocmd for all conflict detection events
+  return vim.api.nvim_create_autocmd(events, {
+    group = augroup,
+    pattern = "*",
+    callback = function(ev)
+      local bufnr = vim.api.nvim_get_current_buf()
+      
+      -- Skip buffers based on configuration
+      if should_skip_buffer(bufnr) then
+        return
+      end
+      
+      -- Detect conflicts
+      M.detect_conflicts()
+    end,
+  })
+end
+
 --- Define <Plug> mappings for extensibility
 local function setup_plug_mappings()
   vim.keymap.set("n", "<Plug>(resolve-next)", M.next_conflict, { desc = "Next conflict (Resolve)" })
@@ -81,6 +171,8 @@ local function setup_plug_mappings()
   vim.keymap.set("n", "<Plug>(resolve-diff-vs-reverse)", M.show_diff_theirs_vs_ours,
     { desc = "Show diff theirs vs ours (Resolve)" })
   vim.keymap.set("n", "<Plug>(resolve-list)", M.list_conflicts, { desc = "List conflicts (Resolve)" })
+  vim.keymap.set("n", "<Plug>(resolve-toggle-auto-detect)", M.toggle_auto_detect, 
+    { desc = "Toggle auto-detect (Resolve)" })
 end
 
 --- Set up buffer-local keymaps (only called when conflicts exist in buffer)
@@ -209,27 +301,20 @@ function M.setup(opts)
   -- Set up highlight groups based on current background
   setup_highlights()
 
-  -- Create augroup for plugin autocmds (clear to handle multiple setup() calls)
-  local augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
-
-  -- Re-apply highlights when colour scheme changes
-  vim.api.nvim_create_autocmd("ColorScheme", {
-    group = augroup,
-    pattern = "*",
-    callback = setup_highlights,
-  })
-
   -- Set up <Plug> mappings (always available for user remapping)
   setup_plug_mappings()
 
-  -- Create autocommand to detect conflicts on buffer enter and after external file changes
-  vim.api.nvim_create_autocmd({ "BufRead", "BufEnter", "FileChangedShellPost" }, {
-    group = augroup,
-    pattern = "*",
-    callback = function()
-      M.detect_conflicts()
-    end,
-  })
+  -- Only create detection autocmds if auto-detect is enabled
+  if config.auto_detect_enabled then
+    -- Create augroup for plugin autocmds (clear to handle multiple setup() calls)
+    resolve_augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
+    
+    -- Create autocmds for conflict detection and color scheme changes
+    setup_autocmd(resolve_augroup)
+    
+    -- Immediately detect conflicts in the current buffer for aggressive lazy loading
+    M.detect_conflicts()  -- show notification on startup
+  end
 end
 
 --- Scan buffer and return list of all conflicts
@@ -376,6 +461,49 @@ function M.detect_conflicts()
   end
 
   return conflicts
+end
+
+--- Toggle automatic conflict detection on text changes
+--- @param enable boolean|nil Enable (true), disable (false), or toggle (nil)
+--- @param silent boolean|nil If true, suppress notification
+function M.toggle_auto_detect(enable, silent)
+  local new_state
+  
+  if enable == nil then
+    -- No parameter provided, toggle current state
+    new_state = not config.auto_detect_enabled
+  else
+    new_state = enable
+  end
+  
+  -- If state hasn't changed, nothing to do
+  if new_state == config.auto_detect_enabled then
+    if not silent then
+      vim.notify("Auto-detect is already " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
+    end
+    return
+  end
+  
+  config.auto_detect_enabled = new_state
+  
+  if new_state then
+    -- Enable: Create augroup and setup autocmd
+    resolve_augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
+    setup_autocmd(resolve_augroup)
+    
+    -- Immediately check for conflicts
+    M.detect_conflicts()
+  else
+    -- Disable: Clear the entire augroup
+    if resolve_augroup then
+      vim.api.nvim_clear_autocmds({ group = "ResolveConflicts" })
+      resolve_augroup = nil
+    end
+  end
+  
+  if not silent then
+    vim.notify("Auto-detect " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
+  end
 end
 
 --- Highlight conflicts in the current buffer
@@ -820,20 +948,25 @@ local function show_diff_internal(show_base_ours, show_base_theirs, show_ours_th
   ---@type string|nil
   local title = " Conflict Diff " -- nil indicates we have encountered an error
 
+  -- Use configured labels for diff titles
+  local base_label = config.diff_view_labels.base
+  local ours_label = config.diff_view_labels.ours
+  local theirs_label = config.diff_view_labels.theirs
+
   if show_base_ours then
-    title = generate_and_add_diff(base_file, ours_file, "Base → Ours", output_parts, multiple, title)
+    title = generate_and_add_diff(base_file, ours_file, base_label .. " → " .. ours_label, output_parts, multiple, title)
   end
 
   if show_base_theirs then
-    title = generate_and_add_diff(base_file, theirs_file, "Base → Theirs", output_parts, multiple, title)
+    title = generate_and_add_diff(base_file, theirs_file, base_label .. " → " .. theirs_label, output_parts, multiple, title)
   end
 
   if show_ours_theirs then
-    title = generate_and_add_diff(ours_file, theirs_file, "Ours → Theirs", output_parts, multiple, title)
+    title = generate_and_add_diff(ours_file, theirs_file, ours_label .. " → " .. theirs_label, output_parts, multiple, title)
   end
 
   if show_theirs_ours then
-    title = generate_and_add_diff(theirs_file, ours_file, "Theirs → Ours", output_parts, multiple, title)
+    title = generate_and_add_diff(theirs_file, ours_file, theirs_label .. " → " .. ours_label, output_parts, multiple, title)
   end
 
   -- Clean up temp files
