@@ -95,13 +95,18 @@ require("resolve").setup({
     theirs = "Theirs",
     base = "Base",
   },
-  -- Enable automatic conflict detection on text changes (e.g., after undo)
+  -- Enable automatic conflict detection
   auto_detect_enabled = true,
   -- Patterns for buffers to skip conflict detection (Lua patterns)
   skip_patterns = {
     buftype = { "." },  -- Skip any buffer with non-empty buftype (terminals, help, etc)
     filetype = {},      -- No filetype skips by default
   },
+  -- Custom function to determine if a buffer should be skipped
+  -- Receives: bufnr (number)
+  -- Returns: boolean (true to skip, false to detect)
+  -- Default checks for readonly and unlisted buffers
+  should_skip = nil,
   -- Callback function called when conflicts are detected
   -- Receives: { bufnr = number, conflicts = table }
   on_conflict_detected = nil,
