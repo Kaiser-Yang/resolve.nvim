@@ -97,6 +97,11 @@ require("resolve").setup({
   },
   -- Enable automatic conflict detection on text changes (e.g., after undo)
   auto_detect_enabled = true,
+  -- Patterns for buffers to skip conflict detection (Lua patterns)
+  skip_patterns = {
+    buftype = { "." },  -- Skip any buffer with non-empty buftype (terminals, help, etc)
+    filetype = {},      -- No filetype skips by default
+  },
   -- Callback function called when conflicts are detected
   -- Receives: { bufnr = number, conflicts = table }
   on_conflict_detected = nil,
@@ -305,6 +310,7 @@ The following `<Plug>` mappings are always available for custom keybindings:
 - `<Plug>(resolve-diff-vs)` - Show diff ours → theirs
 - `<Plug>(resolve-diff-vs-reverse)` - Show diff theirs → ours
 - `<Plug>(resolve-list)` - List conflicts in quickfix
+- `<Plug>(resolve-toggle-auto-detect)` - Toggle automatic conflict detection
 
 **Note:** The default keymaps use `<leader>gc` prefix (git conflicts) to avoid conflicts with LSP-specific keybindings that may be dynamically set under `<leader>c` when language servers attach.
 

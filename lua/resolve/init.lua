@@ -19,6 +19,11 @@ local config = {
   },
   -- Enable automatic conflict detection on text changes
   auto_detect_enabled = true,
+  -- Patterns for buffers to skip conflict detection (Lua patterns)
+  skip_patterns = {
+    buftype = { "." },  -- Skip any buffer with non-empty buftype (terminals, help, etc)
+    filetype = {},      -- No filetype skips by default
+  },
   -- Callback function called when conflicts are detected
   -- Receives: { bufnr = number, conflicts = table }
   on_conflict_detected = nil,
@@ -27,8 +32,8 @@ local config = {
   on_conflicts_resolved = nil,
 }
 
--- Store autocmd ID for TextChanged to enable/disable it
-local text_changed_autocmd_id = nil
+-- Store autocmd ID for detection to enable/disable it
+local detection_autocmd_id = nil
 
 -- Store augroup to use in toggle function
 local resolve_augroup = nil
@@ -77,26 +82,71 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "ResolveAncestorSection", vim.tbl_extend("force", colors.ancestor_section, { default = true }))
 end
 
---- Helper function to setup conflict detection autocmd with appropriate events
+--- Helper function to check if buffer should be skipped
+--- @param bufnr number Buffer number to check
+--- @return boolean True if buffer should be skipped
+local function should_skip_buffer(bufnr)
+  -- Check if buffer is readonly or hidden
+  if vim.bo[bufnr].readonly then
+    return true
+  end
+  
+  -- Check if buffer is listed (skip unlisted/hidden buffers)
+  if not vim.api.nvim_buf_is_loaded(bufnr) or not vim.fn.buflisted(bufnr) then
+    return true
+  end
+  
+  -- Check buftype patterns
+  local buftype = vim.bo[bufnr].buftype
+  for _, pattern in ipairs(config.skip_patterns.buftype) do
+    if buftype:match(pattern) then
+      return true
+    end
+  end
+  
+  -- Check filetype patterns
+  local filetype = vim.bo[bufnr].filetype
+  for _, pattern in ipairs(config.skip_patterns.filetype) do
+    if filetype:match(pattern) then
+      return true
+    end
+  end
+  
+  return false
+end
+
+--- Helper function to setup all autocmds (conflict detection and highlights)
 --- @param augroup number The augroup ID
 --- @param enable_text_changed boolean Whether to include TextChanged event
 --- @return number The autocmd ID
-local function setup_conflict_detection_autocmd(augroup, enable_text_changed)
+local function setup_autocmd(augroup, enable_text_changed)
   -- Build event list based on configuration
   local events = { "BufRead", "BufEnter", "FileChangedShellPost" }
-  if enable_text_changed then
-    table.insert(events, "TextChanged")
-  end
+  -- Always include TextChanged for auto-detection
+  table.insert(events, "TextChanged")
   
-  -- Create a single autocmd for all events
+  -- Re-apply highlights when colour scheme changes
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    group = augroup,
+    pattern = "*",
+    callback = setup_highlights,
+  })
+  
+  -- Create a single autocmd for all conflict detection events
   return vim.api.nvim_create_autocmd(events, {
     group = augroup,
     pattern = "*",
     callback = function(ev)
-      -- For TextChanged, check if it's a normal buffer and use silent mode
+      local bufnr = vim.api.nvim_get_current_buf()
+      
+      -- Skip buffers based on configuration
+      if should_skip_buffer(bufnr) then
+        return
+      end
+      
+      -- For TextChanged, check if auto-detect is enabled and use silent mode
       if ev.event == "TextChanged" then
-        local buftype = vim.bo.buftype
-        if buftype == "" or buftype == "acwrite" then
+        if config.auto_detect_enabled then
           M.detect_conflicts(true)  -- silent mode to avoid notification spam
         end
       else
@@ -125,6 +175,8 @@ local function setup_plug_mappings()
   vim.keymap.set("n", "<Plug>(resolve-diff-vs-reverse)", M.show_diff_theirs_vs_ours,
     { desc = "Show diff theirs vs ours (Resolve)" })
   vim.keymap.set("n", "<Plug>(resolve-list)", M.list_conflicts, { desc = "List conflicts (Resolve)" })
+  vim.keymap.set("n", "<Plug>(resolve-toggle-auto-detect)", function() M.toggle_auto_detect() end, 
+    { desc = "Toggle auto-detect (Resolve)" })
 end
 
 --- Set up buffer-local keymaps (only called when conflicts exist in buffer)
@@ -256,19 +308,11 @@ function M.setup(opts)
   -- Create augroup for plugin autocmds (clear to handle multiple setup() calls)
   resolve_augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
 
-  -- Re-apply highlights when colour scheme changes
-  vim.api.nvim_create_autocmd("ColorScheme", {
-    group = resolve_augroup,
-    pattern = "*",
-    callback = setup_highlights,
-  })
-
   -- Set up <Plug> mappings (always available for user remapping)
   setup_plug_mappings()
 
-  -- Create single autocmd for all conflict detection events
-  -- Includes TextChanged if auto_detect_enabled is true
-  text_changed_autocmd_id = setup_conflict_detection_autocmd(resolve_augroup, config.auto_detect_enabled)
+  -- Create autocmds for conflict detection and color scheme changes
+  detection_autocmd_id = setup_autocmd(resolve_augroup, config.auto_detect_enabled)
 
   -- Immediately detect conflicts in the current buffer for aggressive lazy loading
   M.detect_conflicts(true)  -- silent mode for initial detection
@@ -424,37 +468,18 @@ function M.detect_conflicts(silent)
 end
 
 --- Toggle automatic conflict detection on text changes
---- @param enable string|boolean|number|nil Toggle state: true/"on"/non-zero to enable, false/"off"/0 to disable, nil to toggle
+--- @param enable boolean|nil Enable (true), disable (false), or toggle (nil)
 --- @param silent boolean|nil If true, suppress notification
 function M.toggle_auto_detect(enable, silent)
   local new_state
   
-  -- Parse the enable parameter
   if enable == nil then
     -- No parameter provided, toggle current state
     new_state = not config.auto_detect_enabled
   elseif type(enable) == "boolean" then
     new_state = enable
-  elseif type(enable) == "string" then
-    local lower = enable:lower()
-    if lower == "on" or lower == "true" then
-      new_state = true
-    elseif lower == "off" or lower == "false" then
-      new_state = false
-    else
-      -- Try to convert to number
-      local num = tonumber(enable)
-      if num then
-        new_state = num ~= 0
-      else
-        vim.notify("Invalid parameter: " .. enable .. ". Use true/false, on/off, or 0/non-zero", vim.log.levels.ERROR)
-        return
-      end
-    end
-  elseif type(enable) == "number" then
-    new_state = enable ~= 0
   else
-    vim.notify("Invalid parameter type. Use true/false, on/off, or 0/non-zero", vim.log.levels.ERROR)
+    vim.notify("Invalid parameter type. Expected boolean or nil", vim.log.levels.ERROR)
     return
   end
   
@@ -472,10 +497,10 @@ function M.toggle_auto_detect(enable, silent)
   local augroup = resolve_augroup or vim.api.nvim_create_augroup("ResolveConflicts", { clear = false })
   
   -- Delete the old autocmd and create a new one with updated event list
-  if text_changed_autocmd_id then
-    vim.api.nvim_del_autocmd(text_changed_autocmd_id)
+  if detection_autocmd_id then
+    vim.api.nvim_del_autocmd(detection_autocmd_id)
   end
-  text_changed_autocmd_id = setup_conflict_detection_autocmd(augroup, new_state)
+  detection_autocmd_id = setup_autocmd(augroup, new_state)
   
   -- If enabling, immediately check for conflicts
   if new_state then

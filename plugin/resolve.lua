@@ -69,11 +69,28 @@ vim.api.nvim_create_user_command("ResolveDiffTheirsOurs", function()
 end, { desc = "Show diff between theirs and ours in floating window" })
 
 vim.api.nvim_create_user_command("ResolveToggleAutoDetect", function(opts)
-  local arg = opts.args
-  if arg == "" then
-    arg = nil
+  local enable = nil
+  
+  -- Parse the argument
+  if opts.args ~= "" then
+    local arg = opts.args:lower()
+    if arg == "on" or arg == "true" or arg == "1" then
+      enable = true
+    elseif arg == "off" or arg == "false" or arg == "0" then
+      enable = false
+    else
+      -- Try to convert to number
+      local num = tonumber(opts.args)
+      if num then
+        enable = num ~= 0
+      else
+        vim.notify("Invalid parameter: " .. opts.args .. ". Use true/false, on/off, or 0/non-zero", vim.log.levels.ERROR)
+        return
+      end
+    end
   end
-  require("resolve").toggle_auto_detect(arg, opts.bang)
+  
+  require("resolve").toggle_auto_detect(enable, opts.bang)
 end, { 
   nargs = "?",
   bang = true,
