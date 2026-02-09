@@ -147,13 +147,8 @@ local function setup_autocmd(augroup)
         return
       end
       
-      -- For TextChanged, detect conflicts
-      if ev.event == "TextChanged" then
-        M.detect_conflicts()
-      else
-        -- For other events, detect normally
-        M.detect_conflicts()
-      end
+      -- Detect conflicts
+      M.detect_conflicts()
     end,
   })
 end
