@@ -473,8 +473,7 @@ end
 
 --- Toggle automatic conflict detection on text changes
 --- @param enable boolean|nil Enable (true), disable (false), or toggle (nil)
---- @param silent boolean|nil If true, suppress notification
-function M.toggle_auto_detect(enable, silent)
+function M.toggle_auto_detect(enable)
   local new_state
   
   if enable == nil then
@@ -486,9 +485,7 @@ function M.toggle_auto_detect(enable, silent)
   
   -- If state hasn't changed, nothing to do
   if new_state == config.auto_detect_enabled then
-    if not silent then
-      vim.notify("Auto-detect is already " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
-    end
+    vim.notify("Auto-detect is already " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
     return
   end
   
@@ -499,7 +496,7 @@ function M.toggle_auto_detect(enable, silent)
     resolve_augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
     setup_autocmd(resolve_augroup)
     
-    -- Immediately check for conflicts (not silent to show notification)
+    -- Immediately check for conflicts
     M.detect_conflicts()
   else
     -- Disable: Clear the entire augroup
@@ -509,9 +506,7 @@ function M.toggle_auto_detect(enable, silent)
     end
   end
   
-  if not silent then
-    vim.notify("Auto-detect " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
-  end
+  vim.notify("Auto-detect " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
 end
 
 --- Highlight conflicts in the current buffer
