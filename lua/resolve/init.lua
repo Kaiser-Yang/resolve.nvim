@@ -37,9 +37,6 @@ local config = {
   on_conflicts_resolved = nil,
 }
 
--- Store autocmd ID for detection to enable/disable it
-local detection_autocmd_id = nil
-
 -- Store augroup to use in toggle function
 local resolve_augroup = nil
 
@@ -150,11 +147,9 @@ local function setup_autocmd(augroup)
         return
       end
       
-      -- For TextChanged, check if auto-detect is enabled and use silent mode
+      -- For TextChanged, use silent mode to avoid notification spam
       if ev.event == "TextChanged" then
-        if config.auto_detect_enabled then
-          M.detect_conflicts(true)  -- silent mode to avoid notification spam
-        end
+        M.detect_conflicts(true)  -- silent mode
       else
         -- For other events, detect normally (with notification)
         M.detect_conflicts()
@@ -311,17 +306,20 @@ function M.setup(opts)
   -- Set up highlight groups based on current background
   setup_highlights()
 
-  -- Create augroup for plugin autocmds (clear to handle multiple setup() calls)
-  resolve_augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
-
   -- Set up <Plug> mappings (always available for user remapping)
   setup_plug_mappings()
 
-  -- Create autocmds for conflict detection and color scheme changes
-  detection_autocmd_id = setup_autocmd(resolve_augroup)
-
-  -- Immediately detect conflicts in the current buffer for aggressive lazy loading
-  M.detect_conflicts()  -- show notification on startup
+  -- Only create detection autocmds if auto-detect is enabled
+  if config.auto_detect_enabled then
+    -- Create augroup for plugin autocmds (clear to handle multiple setup() calls)
+    resolve_augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
+    
+    -- Create autocmds for conflict detection and color scheme changes
+    setup_autocmd(resolve_augroup)
+    
+    -- Immediately detect conflicts in the current buffer for aggressive lazy loading
+    M.detect_conflicts()  -- show notification on startup
+  end
 end
 
 --- Scan buffer and return list of all conflicts
@@ -482,11 +480,8 @@ function M.toggle_auto_detect(enable, silent)
   if enable == nil then
     -- No parameter provided, toggle current state
     new_state = not config.auto_detect_enabled
-  elseif type(enable) == "boolean" then
-    new_state = enable
   else
-    vim.notify("Invalid parameter type. Expected boolean or nil", vim.log.levels.ERROR)
-    return
+    new_state = enable
   end
   
   -- If state hasn't changed, nothing to do
@@ -499,18 +494,19 @@ function M.toggle_auto_detect(enable, silent)
   
   config.auto_detect_enabled = new_state
   
-  -- Use the stored augroup or create if not yet initialized
-  local augroup = resolve_augroup or vim.api.nvim_create_augroup("ResolveConflicts", { clear = false })
-  
-  -- Delete the old autocmd and create a new one with updated event list
-  if detection_autocmd_id then
-    vim.api.nvim_del_autocmd(detection_autocmd_id)
-  end
-  detection_autocmd_id = setup_autocmd(augroup)
-  
-  -- If enabling, immediately check for conflicts (not silent to show notification)
   if new_state then
+    -- Enable: Create augroup and setup autocmd
+    resolve_augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
+    setup_autocmd(resolve_augroup)
+    
+    -- Immediately check for conflicts (not silent to show notification)
     M.detect_conflicts()
+  else
+    -- Disable: Clear the entire augroup
+    if resolve_augroup then
+      vim.api.nvim_clear_autocmds({ group = "ResolveConflicts" })
+      resolve_augroup = nil
+    end
   end
   
   if not silent then
