@@ -30,6 +30,9 @@ local config = {
 -- Store autocmd ID for TextChanged to enable/disable it
 local text_changed_autocmd_id = nil
 
+-- Store augroup to use in toggle function
+local resolve_augroup = nil
+
 --- Set up highlight groups with colours appropriate for the current background
 local function setup_highlights()
   local is_dark = vim.o.background == "dark"
@@ -72,6 +75,33 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "ResolveOursSection", vim.tbl_extend("force", colors.ours_section, { default = true }))
   vim.api.nvim_set_hl(0, "ResolveTheirsSection", vim.tbl_extend("force", colors.theirs_section, { default = true }))
   vim.api.nvim_set_hl(0, "ResolveAncestorSection", vim.tbl_extend("force", colors.ancestor_section, { default = true }))
+end
+
+--- Helper function to create or remove the TextChanged autocmd
+--- @param augroup number The augroup ID
+--- @param enable boolean Whether to enable or disable the autocmd
+--- @return number|nil The autocmd ID if enabled, nil otherwise
+local function setup_text_changed_autocmd(augroup, enable)
+  if enable then
+    -- Create the TextChanged autocmd
+    return vim.api.nvim_create_autocmd("TextChanged", {
+      group = augroup,
+      pattern = "*",
+      callback = function()
+        -- Only scan normal buffers (not special buffers)
+        local buftype = vim.bo.buftype
+        if buftype == "" or buftype == "acwrite" then
+          M.detect_conflicts(true)  -- silent mode to avoid notification spam
+        end
+      end,
+    })
+  else
+    -- Disable: Delete the TextChanged autocmd if it exists
+    if text_changed_autocmd_id then
+      vim.api.nvim_del_autocmd(text_changed_autocmd_id)
+    end
+    return nil
+  end
 end
 
 --- Define <Plug> mappings for extensibility
@@ -221,11 +251,11 @@ function M.setup(opts)
   setup_highlights()
 
   -- Create augroup for plugin autocmds (clear to handle multiple setup() calls)
-  local augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
+  resolve_augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = true })
 
   -- Re-apply highlights when colour scheme changes
   vim.api.nvim_create_autocmd("ColorScheme", {
-    group = augroup,
+    group = resolve_augroup,
     pattern = "*",
     callback = setup_highlights,
   })
@@ -235,7 +265,7 @@ function M.setup(opts)
 
   -- Create autocommand to detect conflicts on buffer enter and after external file changes
   vim.api.nvim_create_autocmd({ "BufRead", "BufEnter", "FileChangedShellPost" }, {
-    group = augroup,
+    group = resolve_augroup,
     pattern = "*",
     callback = function()
       M.detect_conflicts()
@@ -245,19 +275,7 @@ function M.setup(opts)
   -- Add TextChanged autocmd to re-detect conflicts when user undoes
   -- This uses silent mode to avoid spamming notifications
   -- Only TextChanged (not TextChangedI) to avoid scanning during active typing
-  if config.auto_detect_enabled then
-    text_changed_autocmd_id = vim.api.nvim_create_autocmd("TextChanged", {
-      group = augroup,
-      pattern = "*",
-      callback = function()
-        -- Only scan normal buffers (not special buffers)
-        local buftype = vim.bo.buftype
-        if buftype == "" or buftype == "acwrite" then
-          M.detect_conflicts(true)  -- silent mode to avoid notification spam
-        end
-      end,
-    })
-  end
+  text_changed_autocmd_id = setup_text_changed_autocmd(resolve_augroup, config.auto_detect_enabled)
 
   -- Immediately detect conflicts in the current buffer for aggressive lazy loading
   M.detect_conflicts(true)  -- silent mode for initial detection
@@ -454,30 +472,13 @@ function M.toggle_auto_detect(enable)
   
   config.auto_detect_enabled = new_state
   
-  local augroup = vim.api.nvim_create_augroup("ResolveConflicts", { clear = false })
+  -- Use the stored augroup or create if not yet initialized
+  local augroup = resolve_augroup or vim.api.nvim_create_augroup("ResolveConflicts", { clear = false })
   
-  if new_state then
-    -- Enable: Create the TextChanged autocmd
-    text_changed_autocmd_id = vim.api.nvim_create_autocmd("TextChanged", {
-      group = augroup,
-      pattern = "*",
-      callback = function()
-        -- Only scan normal buffers (not special buffers)
-        local buftype = vim.bo.buftype
-        if buftype == "" or buftype == "acwrite" then
-          M.detect_conflicts(true)  -- silent mode to avoid notification spam
-        end
-      end,
-    })
-    vim.notify("Auto-detect enabled", vim.log.levels.INFO)
-  else
-    -- Disable: Delete the TextChanged autocmd
-    if text_changed_autocmd_id then
-      vim.api.nvim_del_autocmd(text_changed_autocmd_id)
-      text_changed_autocmd_id = nil
-    end
-    vim.notify("Auto-detect disabled", vim.log.levels.INFO)
-  end
+  -- Use the helper function to enable/disable the autocmd
+  text_changed_autocmd_id = setup_text_changed_autocmd(augroup, new_state)
+  
+  vim.notify("Auto-detect " .. (new_state and "enabled" or "disabled"), vim.log.levels.INFO)
 end
 
 --- Highlight conflicts in the current buffer
