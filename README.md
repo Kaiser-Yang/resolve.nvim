@@ -88,6 +88,13 @@ require("resolve").setup({
   },
   -- Set to false to disable default keymaps
   default_keymaps = true,
+  -- Labels for diff view window titles
+  -- Useful for rebasing where "incoming" is actually "ours"
+  diff_view_labels = {
+    ours = "Ours",
+    theirs = "Theirs",
+    base = "Base",
+  },
   -- Callback function called when conflicts are detected
   -- Receives: { bufnr = number, conflicts = table }
   on_conflict_detected = nil,
@@ -96,6 +103,22 @@ require("resolve").setup({
   on_conflicts_resolved = nil,
 })
 ```
+
+### Customizing Diff View Labels
+
+You can customize the labels shown in diff view window titles. This is particularly useful when rebasing, where the terms "ours" and "theirs" can be confusing:
+
+```lua
+require("resolve").setup({
+  diff_view_labels = {
+    ours = "Current",
+    theirs = "Incoming",
+    base = "Base",
+  },
+})
+```
+
+With this configuration, diff windows will show titles like "Current → Incoming" instead of "Ours → Theirs".
 
 ### Theming and Highlights
 

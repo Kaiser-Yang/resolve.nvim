@@ -11,6 +11,12 @@ local config = {
   },
   -- Keymaps (set to false to disable default keymaps)
   default_keymaps = true,
+  -- Labels for diff view window titles
+  diff_view_labels = {
+    ours = "Ours",
+    theirs = "Theirs",
+    base = "Base",
+  },
   -- Callback function called when conflicts are detected
   -- Receives: { bufnr = number, conflicts = table }
   on_conflict_detected = nil,
@@ -230,6 +236,19 @@ function M.setup(opts)
       M.detect_conflicts()
     end,
   })
+
+  -- Add TextChanged autocmd to re-detect conflicts when user undoes
+  -- This uses silent mode to avoid spamming notifications
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+    group = augroup,
+    pattern = "*",
+    callback = function()
+      M.detect_conflicts(true)  -- silent mode to avoid notification spam
+    end,
+  })
+
+  -- Immediately detect conflicts in the current buffer for aggressive lazy loading
+  M.detect_conflicts(true)  -- silent mode for initial detection
 end
 
 --- Scan buffer and return list of all conflicts
@@ -332,12 +351,15 @@ local function get_current_conflict()
 end
 
 --- Detect conflicts and highlight them (for display purposes)
-function M.detect_conflicts()
+--- @param silent boolean|nil If true, suppress notification
+function M.detect_conflicts(silent)
   local bufnr = vim.api.nvim_get_current_buf()
   local conflicts = scan_conflicts()
 
   if #conflicts > 0 then
-    vim.notify(string.format("Found %d conflict(s)", #conflicts), vim.log.levels.INFO)
+    if not silent then
+      vim.notify(string.format("Found %d conflict(s)", #conflicts), vim.log.levels.INFO)
+    end
     M.highlight_conflicts(conflicts)
 
     -- Set up buffer-local keymaps if enabled
@@ -820,20 +842,25 @@ local function show_diff_internal(show_base_ours, show_base_theirs, show_ours_th
   ---@type string|nil
   local title = " Conflict Diff " -- nil indicates we have encountered an error
 
+  -- Use configured labels for diff titles
+  local base_label = config.diff_view_labels.base
+  local ours_label = config.diff_view_labels.ours
+  local theirs_label = config.diff_view_labels.theirs
+
   if show_base_ours then
-    title = generate_and_add_diff(base_file, ours_file, "Base → Ours", output_parts, multiple, title)
+    title = generate_and_add_diff(base_file, ours_file, base_label .. " → " .. ours_label, output_parts, multiple, title)
   end
 
   if show_base_theirs then
-    title = generate_and_add_diff(base_file, theirs_file, "Base → Theirs", output_parts, multiple, title)
+    title = generate_and_add_diff(base_file, theirs_file, base_label .. " → " .. theirs_label, output_parts, multiple, title)
   end
 
   if show_ours_theirs then
-    title = generate_and_add_diff(ours_file, theirs_file, "Ours → Theirs", output_parts, multiple, title)
+    title = generate_and_add_diff(ours_file, theirs_file, ours_label .. " → " .. theirs_label, output_parts, multiple, title)
   end
 
   if show_theirs_ours then
-    title = generate_and_add_diff(theirs_file, ours_file, "Theirs → Ours", output_parts, multiple, title)
+    title = generate_and_add_diff(theirs_file, ours_file, theirs_label .. " → " .. ours_label, output_parts, multiple, title)
   end
 
   -- Clean up temp files
