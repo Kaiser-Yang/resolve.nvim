@@ -57,6 +57,7 @@ local function is_git_available()
 end
 
 --- Check if current buffer file has merge conflicts according to git
+--- This provides a fast pre-check to avoid scanning large buffers unnecessarily
 --- @param filepath string File path
 --- @param callback function Callback function(has_conflicts: boolean)
 local function check_git_conflicts_async(filepath, callback)
@@ -400,6 +401,8 @@ function M.setup(opts)
 end
 
 --- Scan buffer and return list of all conflicts (async when git available)
+--- Uses git diff --check for fast pre-screening on large files when available.
+--- Falls back to synchronous buffer scanning if git is unavailable or buffer is modified.
 --- @param callback function|nil Callback function(conflicts: table) - if nil, runs synchronously
 local function scan_conflicts(callback)
   local bufnr = vim.api.nvim_get_current_buf()
@@ -414,7 +417,7 @@ local function scan_conflicts(callback)
   
   check_git_conflicts_async(filepath, function(has_conflicts)
     -- If git says no conflicts and buffer is unmodified, we can trust git
-    local is_modified = vim.api.nvim_buf_get_option(bufnr, "modified")
+    local is_modified = vim.bo[bufnr].modified
     
     if not has_conflicts and not is_modified then
       -- Git confirms no conflicts and buffer matches file - no need to scan
