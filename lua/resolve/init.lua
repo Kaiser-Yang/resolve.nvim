@@ -40,20 +40,20 @@ local config = {
 -- Store augroup to use in toggle function
 local resolve_augroup = nil
 
--- Cache for git availability check
-local git_available = nil
+-- Cache for git availability check (nil = not checked yet, true/false = cached result)
+local git_available_cache = nil
 
 --- Check if git command is available
 --- @return boolean True if git is available
 local function is_git_available()
-  if git_available ~= nil then
-    return git_available
+  if git_available_cache ~= nil then
+    return git_available_cache
   end
   
   -- Check if git command exists
   local result = vim.fn.executable("git")
-  git_available = result == 1
-  return git_available
+  git_available_cache = result == 1
+  return git_available_cache
 end
 
 --- Check if current buffer file has merge conflicts according to git
@@ -106,8 +106,10 @@ local function check_git_conflicts_async(filepath, callback)
           
           -- Parse output to check for conflict markers specifically
           -- git diff --check reports "leftover conflict marker" for conflicts
-          local output = (result.stdout or "") .. (result.stderr or "")
-          local has_conflicts = output:match("conflict marker") ~= nil
+          -- Check stderr first (error messages), then stdout
+          local stderr = result.stderr or ""
+          local stdout = result.stdout or ""
+          local has_conflicts = stderr:match("conflict marker") ~= nil or stdout:match("conflict marker") ~= nil
           callback(has_conflicts)
         end)
       )
@@ -536,7 +538,8 @@ end
 
 --- Detect conflicts and highlight them (for display purposes)
 --- NOTE: This function is now asynchronous and does not return conflicts.
---- Use M.list_conflicts() for synchronous access to conflict list.
+--- For synchronous access to the conflict list, call scan_conflicts() directly without a callback,
+--- or use M.list_conflicts() which populates the quickfix list.
 function M.detect_conflicts()
   local bufnr = vim.api.nvim_get_current_buf()
   
