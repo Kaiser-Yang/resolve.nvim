@@ -196,13 +196,19 @@ local function scan_conflicts_buffer_async(bufnr, callback)
         idx = idx + 1
       end
       
-      -- Split lines
+      -- Split lines (handle case where lines_data might be empty or not end with newline)
       local lines_list = {}
-      for line in (lines_data .. "\n"):gmatch("([^\n]*)\n") do
-        table.insert(lines_list, line)
+      if lines_data ~= "" then
+        for line in (lines_data .. "\n"):gmatch("([^\n]*)\n") do
+          table.insert(lines_list, line)
+        end
+        -- Remove the last empty element that might be added due to trailing newline
+        if #lines_list > 0 and lines_list[#lines_list] == "" and lines_data:sub(-1) == "\n" then
+          table.remove(lines_list)
+        end
       end
       
-      -- Scan for conflicts
+      -- Scan for conflicts (markers are Lua patterns like "^<<<<<<<+")
       local conflicts = {}
       local in_conflict = false
       local current_conflict = {}
@@ -263,7 +269,7 @@ local function scan_conflicts_buffer_async(bufnr, callback)
               table.insert(parts, tonumber(part))
             end
             
-            if #parts >= 6 then
+            if #parts == 6 then
               local conflict = {
                 start = parts[1],
                 ours_start = parts[2],
