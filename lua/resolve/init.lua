@@ -154,53 +154,9 @@ local function scan_conflicts_buffer(bufnr)
   return conflicts
 end
 
---- Scan lines for conflicts in a thread-safe manner
---- This function is designed to run in vim.uv.new_work() thread
---- @param lines_str string Newline-separated string of buffer lines
---- @param markers_str string JSON-encoded marker patterns
---- @return string JSON-encoded list of conflicts
-local function scan_lines_threaded(lines_str, markers_str)
-  -- Decode markers from JSON
-  local markers = vim.fn.json_decode(markers_str)
-  
-  -- Split lines
-  local lines = {}
-  for line in lines_str:gmatch("([^\n]*)\n?") do
-    if line ~= "" or lines_str:sub(#lines_str, #lines_str) == "\n" then
-      table.insert(lines, line)
-    end
-  end
-  
-  -- Scan for conflicts
-  local conflicts = {}
-  local in_conflict = false
-  local current_conflict = {}
-  
-  for i, line in ipairs(lines) do
-    if line:match(markers.ours) then
-      in_conflict = true
-      current_conflict = {
-        start = i,
-        ours_start = i,
-      }
-    elseif line:match(markers.ancestor) and in_conflict then
-      current_conflict.ancestor = i
-    elseif line:match(markers.separator) and in_conflict then
-      current_conflict.separator = i
-    elseif line:match(markers.theirs) and in_conflict then
-      current_conflict.theirs_end = i
-      current_conflict["end"] = i
-      table.insert(conflicts, current_conflict)
-      in_conflict = false
-      current_conflict = {}
-    end
-  end
-  
-  -- Return JSON-encoded result
-  return vim.fn.json_encode(conflicts)
-end
-
---- Scan buffer line-by-line for conflicts (asynchronous using vim.uv)
+--- Scan buffer line-by-line for conflicts (asynchronous using vim.uv thread pool)
+--- This function offloads the scanning work to a thread pool to keep UI responsive.
+--- The work function runs in a separate Lua state, so data must be serialized/deserialized.
 --- @param bufnr number Buffer number
 --- @param callback function Callback function(conflicts: table)
 local function scan_conflicts_buffer_async(bufnr, callback)
@@ -610,9 +566,9 @@ function M.setup(opts)
   end
 end
 
---- Scan buffer and return list of all conflicts (async when git available)
---- Uses git diff --check for fast pre-screening on large files when available.
---- Falls back to synchronous buffer scanning if git is unavailable or buffer is modified.
+--- Scan buffer and return list of all conflicts (async when callback provided)
+--- Uses git diff --check for fast pre-screening when available.
+--- Buffer scanning is done asynchronously in a thread pool via vim.uv to keep UI responsive.
 --- @param callback function|nil Callback function(conflicts: table) - if nil, runs synchronously
 local function scan_conflicts(callback)
   local bufnr = vim.api.nvim_get_current_buf()
