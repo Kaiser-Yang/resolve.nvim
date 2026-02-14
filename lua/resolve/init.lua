@@ -40,6 +40,88 @@ local config = {
 -- Store augroup to use in toggle function
 local resolve_augroup = nil
 
+-- Cache for git availability check
+local git_available = nil
+
+--- Check if git command is available
+--- @return boolean True if git is available
+local function is_git_available()
+  if git_available ~= nil then
+    return git_available
+  end
+  
+  -- Check if git command exists
+  local result = vim.fn.executable("git")
+  git_available = result == 1
+  return git_available
+end
+
+--- Check if current buffer file has merge conflicts according to git
+--- @param filepath string File path
+--- @param callback function Callback function(has_conflicts: boolean)
+local function check_git_conflicts_async(filepath, callback)
+  if not is_git_available() or filepath == "" or vim.fn.filereadable(filepath) == 0 then
+    callback(false)
+    return
+  end
+  
+  local dir = vim.fn.fnamemodify(filepath, ":h")
+  
+  -- First check if we're in a git repo
+  vim.system(
+    { "git", "-C", dir, "rev-parse", "--git-dir" },
+    { text = true },
+    vim.schedule_wrap(function(repo_result)
+      if repo_result.code ~= 0 then
+        callback(false)
+        return
+      end
+      
+      -- Check if file has conflict markers using git diff --check
+      vim.system(
+        { "git", "diff", "--check", filepath },
+        { text = true, cwd = dir },
+        vim.schedule_wrap(function(result)
+          -- git diff --check returns non-zero exit code if conflicts found
+          callback(result.code ~= 0)
+        end)
+      )
+    end)
+  )
+end
+
+--- Scan buffer line-by-line for conflicts
+--- @param bufnr number Buffer number
+--- @return table List of conflict tables
+local function scan_conflicts_buffer(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local conflicts = {}
+  local in_conflict = false
+  local current_conflict = {}
+
+  for i, line in ipairs(lines) do
+    if line:match(config.markers.ours) then
+      in_conflict = true
+      current_conflict = {
+        start = i,
+        ours_start = i,
+      }
+    elseif line:match(config.markers.ancestor) and in_conflict then
+      current_conflict.ancestor = i
+    elseif line:match(config.markers.separator) and in_conflict then
+      current_conflict.separator = i
+    elseif line:match(config.markers.theirs) and in_conflict then
+      current_conflict.theirs_end = i
+      current_conflict["end"] = i
+      table.insert(conflicts, current_conflict)
+      in_conflict = false
+      current_conflict = {}
+    end
+  end
+
+  return conflicts
+end
+
 --- Set up highlight groups with colours appropriate for the current background
 local function setup_highlights()
   local is_dark = vim.o.background == "dark"
@@ -317,37 +399,37 @@ function M.setup(opts)
   end
 end
 
---- Scan buffer and return list of all conflicts
---- @return table List of conflict tables
-local function scan_conflicts()
+--- Scan buffer and return list of all conflicts (async when git available)
+--- @param callback function|nil Callback function(conflicts: table) - if nil, runs synchronously
+local function scan_conflicts(callback)
   local bufnr = vim.api.nvim_get_current_buf()
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-
-  local conflicts = {}
-  local in_conflict = false
-  local current_conflict = {}
-
-  for i, line in ipairs(lines) do
-    if line:match(config.markers.ours) then
-      in_conflict = true
-      current_conflict = {
-        start = i,
-        ours_start = i,
-      }
-    elseif line:match(config.markers.ancestor) and in_conflict then
-      current_conflict.ancestor = i
-    elseif line:match(config.markers.separator) and in_conflict then
-      current_conflict.separator = i
-    elseif line:match(config.markers.theirs) and in_conflict then
-      current_conflict.theirs_end = i
-      current_conflict["end"] = i
-      table.insert(conflicts, current_conflict)
-      in_conflict = false
-      current_conflict = {}
-    end
+  
+  -- Synchronous mode - for compatibility with existing code
+  if callback == nil then
+    return scan_conflicts_buffer(bufnr)
   end
-
-  return conflicts
+  
+  -- Async mode - try git first for performance optimization
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+  
+  check_git_conflicts_async(filepath, function(has_conflicts)
+    -- If git says no conflicts and buffer is unmodified, we can trust git
+    local is_modified = vim.api.nvim_buf_get_option(bufnr, "modified")
+    
+    if not has_conflicts and not is_modified then
+      -- Git confirms no conflicts and buffer matches file - no need to scan
+      callback({})
+      return
+    end
+    
+    -- Either git detected conflicts, buffer is modified, or git is unavailable
+    -- Scan buffer to get exact positions
+    -- Use vim.schedule to avoid blocking UI on large buffers
+    vim.schedule(function()
+      local conflicts = scan_conflicts_buffer(bufnr)
+      callback(conflicts)
+    end)
+  end)
 end
 
 --- Find conflict at or around the cursor position by scanning the buffer
@@ -419,48 +501,48 @@ end
 --- Detect conflicts and highlight them (for display purposes)
 function M.detect_conflicts()
   local bufnr = vim.api.nvim_get_current_buf()
-  local conflicts = scan_conflicts()
+  
+  -- Use async scanning with git for better performance on large buffers
+  scan_conflicts(function(conflicts)
+    if #conflicts > 0 then
+      vim.notify(string.format("Found %d conflict(s)", #conflicts), vim.log.levels.INFO)
+      M.highlight_conflicts(conflicts)
 
-  if #conflicts > 0 then
-    vim.notify(string.format("Found %d conflict(s)", #conflicts), vim.log.levels.INFO)
-    M.highlight_conflicts(conflicts)
+      -- Set up buffer-local keymaps if enabled
+      if config.default_keymaps then
+        setup_buffer_keymaps(bufnr)
+      end
 
-    -- Set up buffer-local keymaps if enabled
-    if config.default_keymaps then
-      setup_buffer_keymaps(bufnr)
-    end
+      -- Set up matchit integration
+      setup_matchit(bufnr)
 
-    -- Set up matchit integration
-    setup_matchit(bufnr)
+      -- Call user hook if defined (protected to prevent errors from breaking plugin)
+      if config.on_conflict_detected then
+        local ok, err = pcall(config.on_conflict_detected, { bufnr = bufnr, conflicts = conflicts })
+        if not ok then
+          vim.notify("Error in on_conflict_detected hook: " .. tostring(err), vim.log.levels.ERROR)
+        end
+      end
+    else
+      -- Clear highlights if no conflicts
+      local ns_id = vim.api.nvim_create_namespace("resolve_conflicts")
+      vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
 
-    -- Call user hook if defined (protected to prevent errors from breaking plugin)
-    if config.on_conflict_detected then
-      local ok, err = pcall(config.on_conflict_detected, { bufnr = bufnr, conflicts = conflicts })
-      if not ok then
-        vim.notify("Error in on_conflict_detected hook: " .. tostring(err), vim.log.levels.ERROR)
+      -- Remove buffer-local keymaps and matchit integration
+      if config.default_keymaps then
+        remove_buffer_keymaps(bufnr)
+      end
+      remove_matchit(bufnr)
+
+      -- Call user hook if defined (protected to prevent errors from breaking plugin)
+      if config.on_conflicts_resolved then
+        local ok, err = pcall(config.on_conflicts_resolved, { bufnr = bufnr })
+        if not ok then
+          vim.notify("Error in on_conflicts_resolved hook: " .. tostring(err), vim.log.levels.ERROR)
+        end
       end
     end
-  else
-    -- Clear highlights if no conflicts
-    local ns_id = vim.api.nvim_create_namespace("resolve_conflicts")
-    vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
-
-    -- Remove buffer-local keymaps and matchit integration
-    if config.default_keymaps then
-      remove_buffer_keymaps(bufnr)
-    end
-    remove_matchit(bufnr)
-
-    -- Call user hook if defined (protected to prevent errors from breaking plugin)
-    if config.on_conflicts_resolved then
-      local ok, err = pcall(config.on_conflicts_resolved, { bufnr = bufnr })
-      if not ok then
-        vim.notify("Error in on_conflicts_resolved hook: " .. tostring(err), vim.log.levels.ERROR)
-      end
-    end
-  end
-
-  return conflicts
+  end)
 end
 
 --- Toggle automatic conflict detection on text changes
