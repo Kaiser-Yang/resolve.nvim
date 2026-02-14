@@ -108,12 +108,12 @@ local function check_git_conflicts_async(filepath, callback)
           
           -- Parse output to check for conflict markers specifically
           -- git diff --check reports "leftover conflict marker" for conflicts
-          -- Check stderr first (where git typically reports errors), then stdout if needed
+          -- Use a more specific pattern to avoid false positives from unrelated messages
           local stderr = result.stderr or ""
-          local has_conflicts = stderr:match("conflict marker") ~= nil
+          local has_conflicts = stderr:match("leftover conflict marker") ~= nil
           if not has_conflicts then
             local stdout = result.stdout or ""
-            has_conflicts = stdout:match("conflict marker") ~= nil
+            has_conflicts = stdout:match("leftover conflict marker") ~= nil
           end
           callback(has_conflicts)
         end)
