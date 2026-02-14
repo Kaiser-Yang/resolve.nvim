@@ -313,7 +313,9 @@ function M.setup(opts)
     setup_autocmd(resolve_augroup)
     
     -- Immediately detect conflicts in the current buffer for aggressive lazy loading
-    M.detect_conflicts()  -- show notification on startup
+    if not should_skip_buffer(vim.api.nvim_get_current_buf()) then
+      M.detect_conflicts()  -- show notification on startup
+    end
   end
 end
 
@@ -492,7 +494,9 @@ function M.toggle_auto_detect(enable, silent)
     setup_autocmd(resolve_augroup)
     
     -- Immediately check for conflicts
-    M.detect_conflicts()
+    if not should_skip_buffer(vim.api.nvim_get_current_buf()) then
+      M.detect_conflicts()  -- show notification when toggling on
+    end
   else
     -- Disable: Clear the entire augroup
     if resolve_augroup then
