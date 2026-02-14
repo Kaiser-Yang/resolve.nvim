@@ -173,6 +173,7 @@ local function scan_conflicts_buffer_async(bufnr, callback)
   local lines_str = table.concat(lines, "\n")
   
   -- Prepare markers as a simple format: ours|theirs|ancestor|separator
+  -- Pipe delimiter is safe because marker patterns don't contain pipes
   local markers_str = string.format("%s|%s|%s|%s",
     config.markers.ours,
     config.markers.theirs,
@@ -196,15 +197,23 @@ local function scan_conflicts_buffer_async(bufnr, callback)
         idx = idx + 1
       end
       
-      -- Split lines (handle case where lines_data might be empty or not end with newline)
+      -- Split lines - use a simpler and more robust approach
+      -- Since we concatenated with "\n", split on "\n" 
       local lines_list = {}
       if lines_data ~= "" then
-        for line in (lines_data .. "\n"):gmatch("([^\n]*)\n") do
-          table.insert(lines_list, line)
-        end
-        -- Remove the last empty element that might be added due to trailing newline
-        if #lines_list > 0 and lines_list[#lines_list] == "" and lines_data:sub(-1) == "\n" then
-          table.remove(lines_list)
+        local pos = 1
+        while true do
+          local next_newline = lines_data:find("\n", pos, true)
+          if next_newline then
+            table.insert(lines_list, lines_data:sub(pos, next_newline - 1))
+            pos = next_newline + 1
+          else
+            -- Last line (or only line if no newlines)
+            if pos <= #lines_data then
+              table.insert(lines_list, lines_data:sub(pos))
+            end
+            break
+          end
         end
       end
       
@@ -235,6 +244,7 @@ local function scan_conflicts_buffer_async(bufnr, callback)
       
       -- Serialize conflicts to a simple format
       -- Format: start,ours_start,ancestor,separator,theirs_end,end;start,ours_start,...
+      -- Comma/semicolon delimiters are safe because conflict data is just line numbers
       -- Use -1 for nil ancestor values
       local result_parts = {}
       for _, conflict in ipairs(conflicts) do
