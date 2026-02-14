@@ -122,7 +122,7 @@ local function check_git_conflicts_async(filepath, callback)
   )
 end
 
---- Scan buffer line-by-line for conflicts
+--- Scan buffer line-by-line for conflicts (synchronous)
 --- @param bufnr number Buffer number
 --- @return table List of conflict tables
 local function scan_conflicts_buffer(bufnr)
@@ -152,6 +152,185 @@ local function scan_conflicts_buffer(bufnr)
   end
 
   return conflicts
+end
+
+--- Scan lines for conflicts in a thread-safe manner
+--- This function is designed to run in vim.uv.new_work() thread
+--- @param lines_str string Newline-separated string of buffer lines
+--- @param markers_str string JSON-encoded marker patterns
+--- @return string JSON-encoded list of conflicts
+local function scan_lines_threaded(lines_str, markers_str)
+  -- Decode markers from JSON
+  local markers = vim.fn.json_decode(markers_str)
+  
+  -- Split lines
+  local lines = {}
+  for line in lines_str:gmatch("([^\n]*)\n?") do
+    if line ~= "" or lines_str:sub(#lines_str, #lines_str) == "\n" then
+      table.insert(lines, line)
+    end
+  end
+  
+  -- Scan for conflicts
+  local conflicts = {}
+  local in_conflict = false
+  local current_conflict = {}
+  
+  for i, line in ipairs(lines) do
+    if line:match(markers.ours) then
+      in_conflict = true
+      current_conflict = {
+        start = i,
+        ours_start = i,
+      }
+    elseif line:match(markers.ancestor) and in_conflict then
+      current_conflict.ancestor = i
+    elseif line:match(markers.separator) and in_conflict then
+      current_conflict.separator = i
+    elseif line:match(markers.theirs) and in_conflict then
+      current_conflict.theirs_end = i
+      current_conflict["end"] = i
+      table.insert(conflicts, current_conflict)
+      in_conflict = false
+      current_conflict = {}
+    end
+  end
+  
+  -- Return JSON-encoded result
+  return vim.fn.json_encode(conflicts)
+end
+
+--- Scan buffer line-by-line for conflicts (asynchronous using vim.uv)
+--- @param bufnr number Buffer number
+--- @param callback function Callback function(conflicts: table)
+local function scan_conflicts_buffer_async(bufnr, callback)
+  -- Validate buffer exists
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    callback({})
+    return
+  end
+  
+  -- Get buffer lines in main thread
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  
+  -- Prepare data for thread: lines as newline-separated string
+  local lines_str = table.concat(lines, "\n")
+  
+  -- Prepare markers as a simple format: ours|theirs|ancestor|separator
+  local markers_str = string.format("%s|%s|%s|%s",
+    config.markers.ours,
+    config.markers.theirs,
+    config.markers.ancestor,
+    config.markers.separator
+  )
+  
+  -- Create work item to run in thread pool
+  local work = vim.uv.new_work(
+    function(lines_data, markers_data)
+      -- This runs in a separate thread with its own Lua state
+      -- Parse markers
+      local markers = {}
+      local idx = 1
+      for marker in markers_data:gmatch("([^|]+)") do
+        if idx == 1 then markers.ours = marker
+        elseif idx == 2 then markers.theirs = marker
+        elseif idx == 3 then markers.ancestor = marker
+        elseif idx == 4 then markers.separator = marker
+        end
+        idx = idx + 1
+      end
+      
+      -- Split lines
+      local lines_list = {}
+      for line in (lines_data .. "\n"):gmatch("([^\n]*)\n") do
+        table.insert(lines_list, line)
+      end
+      
+      -- Scan for conflicts
+      local conflicts = {}
+      local in_conflict = false
+      local current_conflict = {}
+      
+      for i, line in ipairs(lines_list) do
+        if line:match(markers.ours) then
+          in_conflict = true
+          current_conflict = {
+            start = i,
+            ours_start = i,
+          }
+        elseif line:match(markers.ancestor) and in_conflict then
+          current_conflict.ancestor = i
+        elseif line:match(markers.separator) and in_conflict then
+          current_conflict.separator = i
+        elseif line:match(markers.theirs) and in_conflict then
+          current_conflict.theirs_end = i
+          current_conflict["end"] = i
+          table.insert(conflicts, current_conflict)
+          in_conflict = false
+          current_conflict = {}
+        end
+      end
+      
+      -- Serialize conflicts to a simple format
+      -- Format: start,ours_start,ancestor,separator,theirs_end,end;start,ours_start,...
+      -- Use -1 for nil ancestor values
+      local result_parts = {}
+      for _, conflict in ipairs(conflicts) do
+        local parts = {
+          tostring(conflict.start),
+          tostring(conflict.ours_start),
+          tostring(conflict.ancestor or -1),
+          tostring(conflict.separator),
+          tostring(conflict.theirs_end),
+          tostring(conflict["end"])
+        }
+        table.insert(result_parts, table.concat(parts, ","))
+      end
+      
+      return table.concat(result_parts, ";")
+    end,
+    function(result_str)
+      -- This runs in the main loop after work completes
+      vim.schedule(function()
+        -- Validate buffer still exists
+        if not vim.api.nvim_buf_is_valid(bufnr) then
+          callback({})
+          return
+        end
+        
+        -- Deserialize conflicts
+        local conflicts = {}
+        if result_str ~= "" then
+          for conflict_str in result_str:gmatch("([^;]+)") do
+            local parts = {}
+            for part in conflict_str:gmatch("([^,]+)") do
+              table.insert(parts, tonumber(part))
+            end
+            
+            if #parts >= 6 then
+              local conflict = {
+                start = parts[1],
+                ours_start = parts[2],
+                separator = parts[4],
+                theirs_end = parts[5],
+                ["end"] = parts[6],
+              }
+              -- Add ancestor only if it's not -1
+              if parts[3] ~= -1 then
+                conflict.ancestor = parts[3]
+              end
+              table.insert(conflicts, conflict)
+            end
+          end
+        end
+        
+        callback(conflicts)
+      end)
+    end
+  )
+  
+  -- Queue the work
+  work:queue(lines_str, markers_str)
 end
 
 --- Set up highlight groups with colours appropriate for the current background
@@ -464,16 +643,8 @@ local function scan_conflicts(callback)
     end
     
     -- Either git detected conflicts, buffer is modified, or git is unavailable
-    -- Scan buffer to get exact positions
-    -- Use vim.schedule to avoid blocking UI on large buffers
-    vim.schedule(function()
-      -- Double-check buffer validity before scanning
-      if not vim.api.nvim_buf_is_valid(bufnr) then
-        return
-      end
-      local conflicts = scan_conflicts_buffer(bufnr)
-      callback(conflicts)
-    end)
+    -- Scan buffer to get exact positions using async thread-based scanning
+    scan_conflicts_buffer_async(bufnr, callback)
   end)
 end
 
