@@ -61,7 +61,21 @@ end
 --- @param filepath string File path
 --- @param callback function Callback function(has_conflicts: boolean)
 local function check_git_conflicts_async(filepath, callback)
-  if not is_git_available() or filepath == "" or vim.fn.filereadable(filepath) == 0 then
+  -- Handle different failure scenarios
+  if not is_git_available() then
+    -- Git not available - fall back to buffer scan
+    callback(false)
+    return
+  end
+  
+  if filepath == "" then
+    -- New buffer without file - fall back to buffer scan
+    callback(false)
+    return
+  end
+  
+  if vim.fn.filereadable(filepath) == 0 then
+    -- File doesn't exist yet - fall back to buffer scan
     callback(false)
     return
   end
@@ -83,8 +97,18 @@ local function check_git_conflicts_async(filepath, callback)
         { "git", "diff", "--check", filepath },
         { text = true, cwd = dir },
         vim.schedule_wrap(function(result)
-          -- git diff --check returns non-zero exit code if conflicts found
-          callback(result.code ~= 0)
+          -- git diff --check returns non-zero for both whitespace errors and conflict markers
+          -- Check the output specifically for conflict marker messages
+          if result.code == 0 then
+            callback(false)
+            return
+          end
+          
+          -- Parse output to check for conflict markers specifically
+          -- git diff --check reports "leftover conflict marker" for conflicts
+          local output = (result.stdout or "") .. (result.stderr or "")
+          local has_conflicts = output:match("conflict marker") ~= nil
+          callback(has_conflicts)
         end)
       )
     end)
@@ -416,6 +440,11 @@ local function scan_conflicts(callback)
   local filepath = vim.api.nvim_buf_get_name(bufnr)
   
   check_git_conflicts_async(filepath, function(has_conflicts)
+    -- Validate buffer still exists (user might have closed it during async operation)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    
     -- If git says no conflicts and buffer is unmodified, we can trust git
     local is_modified = vim.bo[bufnr].modified
     
@@ -429,6 +458,10 @@ local function scan_conflicts(callback)
     -- Scan buffer to get exact positions
     -- Use vim.schedule to avoid blocking UI on large buffers
     vim.schedule(function()
+      -- Double-check buffer validity before scanning
+      if not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
       local conflicts = scan_conflicts_buffer(bufnr)
       callback(conflicts)
     end)
@@ -502,6 +535,8 @@ local function get_current_conflict()
 end
 
 --- Detect conflicts and highlight them (for display purposes)
+--- NOTE: This function is now asynchronous and does not return conflicts.
+--- Use M.list_conflicts() for synchronous access to conflict list.
 function M.detect_conflicts()
   local bufnr = vim.api.nvim_get_current_buf()
   
