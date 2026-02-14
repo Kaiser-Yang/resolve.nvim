@@ -41,6 +41,8 @@ local config = {
 local resolve_augroup = nil
 
 -- Cache for git availability check (nil = not checked yet, true/false = cached result)
+-- Note: This cache persists for the entire editor session. If git is installed/uninstalled
+-- during the session, restart Neovim to refresh the cache.
 local git_available_cache = nil
 
 --- Check if git command is available
@@ -106,10 +108,13 @@ local function check_git_conflicts_async(filepath, callback)
           
           -- Parse output to check for conflict markers specifically
           -- git diff --check reports "leftover conflict marker" for conflicts
-          -- Check stderr first (error messages), then stdout
+          -- Check stderr first (where git typically reports errors), then stdout if needed
           local stderr = result.stderr or ""
-          local stdout = result.stdout or ""
-          local has_conflicts = stderr:match("conflict marker") ~= nil or stdout:match("conflict marker") ~= nil
+          local has_conflicts = stderr:match("conflict marker") ~= nil
+          if not has_conflicts then
+            local stdout = result.stdout or ""
+            has_conflicts = stdout:match("conflict marker") ~= nil
+          end
           callback(has_conflicts)
         end)
       )
@@ -447,7 +452,9 @@ local function scan_conflicts(callback)
       return
     end
     
-    -- If git says no conflicts and buffer is unmodified, we can trust git
+    -- Check if buffer has been modified since git checked the file on disk
+    -- Modified buffers must be scanned because their content differs from disk,
+    -- so git's assessment of the file on disk may not match the buffer content
     local is_modified = vim.bo[bufnr].modified
     
     if not has_conflicts and not is_modified then
@@ -538,8 +545,8 @@ end
 
 --- Detect conflicts and highlight them (for display purposes)
 --- NOTE: This function is now asynchronous and does not return conflicts.
---- For synchronous access to the conflict list, call scan_conflicts() directly without a callback,
---- or use M.list_conflicts() which populates the quickfix list.
+--- For synchronous access to the conflict list, use M.list_conflicts() which populates
+--- the quickfix list with all conflicts found in the buffer.
 function M.detect_conflicts()
   local bufnr = vim.api.nvim_get_current_buf()
   
