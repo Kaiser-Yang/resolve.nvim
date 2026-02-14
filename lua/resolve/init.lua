@@ -162,6 +162,7 @@ end
 local function scan_conflicts_buffer_async(bufnr, callback)
   -- Validate buffer exists
   if not vim.api.nvim_buf_is_valid(bufnr) then
+    -- Return empty list - consistent with "no conflicts found" behavior
     callback({})
     return
   end
@@ -198,7 +199,9 @@ local function scan_conflicts_buffer_async(bufnr, callback)
       end
       
       -- Split lines - use a simpler and more robust approach
-      -- Since we concatenated with "\n", split on "\n" 
+      -- Since we concatenated with "\n", split on "\n"
+      -- Note: Empty buffer results in empty lines_data, which is handled
+      -- A buffer with only empty lines will have lines_data like "\n\n" and will be split correctly
       local lines_list = {}
       if lines_data ~= "" then
         local pos = 1
@@ -266,6 +269,7 @@ local function scan_conflicts_buffer_async(bufnr, callback)
       vim.schedule(function()
         -- Validate buffer still exists
         if not vim.api.nvim_buf_is_valid(bufnr) then
+          -- Buffer was closed during async operation - return empty list
           callback({})
           return
         end
@@ -301,8 +305,22 @@ local function scan_conflicts_buffer_async(bufnr, callback)
     end
   )
   
-  -- Queue the work
-  work:queue(lines_str, markers_str)
+  -- Queue the work with error handling
+  local ok, err = pcall(function()
+    work:queue(lines_str, markers_str)
+  end)
+  
+  if not ok then
+    -- If queueing fails, fall back to synchronous scanning in next tick
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        local conflicts = scan_conflicts_buffer(bufnr)
+        callback(conflicts)
+      else
+        callback({})
+      end
+    end)
+  end
 end
 
 --- Set up highlight groups with colours appropriate for the current background
