@@ -419,13 +419,15 @@ local function get_current_conflict()
 end
 
 --- Detect conflicts and highlight them (for display purposes)
-function M.detect_conflicts(bufnr)
+function M.detect_conflicts(bufnr, silent)
   if bufnr == 0 then bufnr = nil end
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local conflicts = scan_conflicts(bufnr)
 
   if #conflicts > 0 then
-    vim.notify_once(string.format("Found %d conflict(s)", #conflicts), vim.log.levels.INFO)
+    if not silent then
+      vim.notify_once(string.format("Found %d conflict(s)", #conflicts), vim.log.levels.INFO)
+    end
     M.highlight_conflicts(conflicts)
 
     -- Set up buffer-local keymaps if enabled
