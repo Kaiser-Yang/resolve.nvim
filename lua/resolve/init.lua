@@ -20,7 +20,7 @@ local config = {
   diff_view_labels = {
     ours = "Current",
     theirs = "Incomming",
-    base = "Ancestor",
+    ancestor = "Ancestor",
   },
   -- Enable automatic conflict detection (controls whether detection autocmd is created)
   auto_detect_enabled = true,
@@ -964,16 +964,16 @@ local function show_diff_internal(show_base_ours, show_base_theirs, show_ours_th
   local title = " Conflict Diff " -- nil indicates we have encountered an error
 
   -- Use configured labels for diff titles
-  local base_label = config.diff_view_labels.base
+  local ancestor_label = config.diff_view_labels.ancestor
   local ours_label = config.diff_view_labels.ours
   local theirs_label = config.diff_view_labels.theirs
 
   if show_base_ours then
-    title = generate_and_add_diff(base_file, ours_file, base_label .. " → " .. ours_label, output_parts, multiple, title)
+    title = generate_and_add_diff(base_file, ours_file, ancestor_label .. " → " .. ours_label, output_parts, multiple, title)
   end
 
   if show_base_theirs then
-    title = generate_and_add_diff(base_file, theirs_file, base_label .. " → " .. theirs_label, output_parts, multiple, title)
+    title = generate_and_add_diff(base_file, theirs_file, ancestor_label .. " → " .. theirs_label, output_parts, multiple, title)
   end
 
   if show_ours_theirs then
